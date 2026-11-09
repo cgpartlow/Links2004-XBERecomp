@@ -1,0 +1,335 @@
+# Recompiler input for b7a0f6e3-default.xbe, written by xbe_symbols
+
+[xbe]
+path = "assets/default.xbe"
+title = 0x4D53005D
+entry = 0x3AC81
+xdk = 5558
+out = "generated/game"
+partitions = 128
+code_sections = [".text", "D3D", "D3DX", "XGRPH", "XNET", "XONLINE", "XMV", "DSOUND", "XACTENG", "WMADEC", "XPP"]
+library = "Links2004.dll"  # <exe>.dll, which the executable delay loads
+
+# extra entry points
+[functions]
+
+# functions the host replaces or calls by name, 0 where the image has none
+[symbols]
+_CIacos                                              = 0x24A9E0
+_CIasin                                              = 0x24AD68
+accept                                               = 0x34ADB1
+bind                                                 = 0x34AD90
+BinkDoFrame                                          = 0
+BinkGetSummary                                       = 0
+BinkNextFrame                                        = 0
+BinkWait                                             = 0
+CDevice_KickOff                                      = 0
+CDirectSoundStream_AddRef                            = 0x39F2C0
+CDirectSoundStream_Discontinuity                     = 0x39F3BC
+CDirectSoundStream_Flush                             = 0x39F409
+CDirectSoundStream_FlushEx                           = 0x39F56D
+CDirectSoundStream_GetInfo                           = 0x39F355
+CDirectSoundStream_GetStatus                         = 0x39F454
+CDirectSoundStream_Pause                             = 0x39F51C
+CDirectSoundStream_Process                           = 0x39F4A5
+CDirectSoundStream_Release                           = 0x39F307
+CDirectSoundStream_SetFilter                         = 0x39FD55
+CDirectSoundStream_SetFormat                         = 0x3A0E7A
+CDirectSoundStream_SetFrequency                      = 0
+CDirectSoundStream_SetHeadroom                       = 0x39FDA7
+CDirectSoundStream_SetI3DL2Source                    = 0
+CDirectSoundStream_SetMaxDistance                    = 0
+CDirectSoundStream_SetMinDistance                    = 0
+CDirectSoundStream_SetMixBins                        = 0x3A07DD
+CDirectSoundStream_SetMixBinVolumes                  = 0x39FDF9
+CDirectSoundStream_SetPosition                       = 0
+CDirectSoundStream_SetVelocity                       = 0
+CDirectSoundStream_SetVolume                         = 0x39FC5F
+closesocket                                          = 0x34AD60
+connect                                              = 0x34AD9B
+crt_acos                                             = 0x24A9FD
+crt_asin                                             = 0x24AD85
+crt_atan                                             = 0
+crt_cos                                              = 0
+crt_log                                              = 0
+crt_log10                                            = 0
+crt_pow                                              = 0x2483B4
+crt_sin                                              = 0
+crt_sqrt                                             = 0
+crt_tan                                              = 0
+D3D_BlockOnResource                                  = 0x2DCFB0  # by hand: 1 argument; checks whether the resource is pending, then waits with D3D_BlockOnTime; Lock2DSurface 0x2E0771 calls it
+D3D_BlockOnTime                                      = 0x2DCC80  # by hand: 2 arguments (ret 8): the fence time and a flag
+D3D_InitDefaultState                                 = 0x2DF000
+D3D_InternalAddRef                                   = 0x2DD1A0
+D3D_InternalRelease                                  = 0x2DD3D0
+D3D_KickOffAndWaitForIdle                            = 0x2DCF90  # by hand: passes the device time (+0x2C) and 2 to D3D_BlockOnTime
+D3D_MakeRequestedSpace                               = 0x2DCDF0  # by hand: 2 arguments; D3DDevice_MakeSpace 0x2DCF39 calls it
+D3D_SetFence                                         = 0x2DCBD0  # by hand: 1 argument; pushes a fence command (0x4A310) built from the device time at +0x2C
+D3DDevice_Begin                                      = 0x2E5190
+D3DDevice_BeginPush                                  = 0
+D3DDevice_BlockOnFence                               = 0
+D3DDevice_BlockUntilVerticalBlank                    = 0x2D87C0  # by hand: clears the SignalState of the event at device +0x1DAC and waits on it
+D3DDevice_Clear                                      = 0x2E0DE0  # by hand: 6 arguments (ret 0x18), reads the render target and depth surface
+D3DDevice_CopyRects                                  = 0x2D8EB0
+D3DDevice_CreatePixelShader                          = 0x2E4200  # by hand: 2 arguments; allocates 0xFC, definition copy at +0xC pointed to by +8
+D3DDevice_CreateVertexShader                         = 0x2DDC10
+D3DDevice_DeletePixelShader                          = 0x2E4250  # by hand: 1 argument; drops the reference and frees it
+D3DDevice_DeleteVertexShader                         = 0x2DE320  # by hand: 1 argument; drops the reference at handle - 1 and frees it
+D3DDevice_DrawIndexedVertices                        = 0x2E4EF0
+D3DDevice_DrawIndexedVerticesUP                      = 0x2E4D10  # by hand: 5 arguments (ret 0x14); pushes 0x417FC, beside DrawVerticesUP
+D3DDevice_DrawVertices                               = 0x2E4E50
+D3DDevice_DrawVerticesUP                             = 0x2E4BA0  # by hand: 4 arguments (ret 0x10); pushes 0x417FC (begin) and divides by the stream stride; the game calls it at 0x263CE2
+D3DDevice_EnableOverlay                              = 0x2E7DC0
+D3DDevice_UpdateOverlay                              = 0x2E7C40  # by hand: 5 arguments (surface, src rect, dst rect, enable color key, color key), ret 0x14; the movie loop 0x7F6D5 calls it once a decoded frame
+D3DDevice_End                                        = 0x2E51D0  # by hand: no arguments; pushes 0x417FC with 0, the end of the primitive D3DDevice_Begin 0x2E5190 opened
+D3DDevice_EndPush                                    = 0
+D3DDevice_FlushVertexCache                           = 0
+D3DDevice_GetBackBuffer2                             = 0x2D8DF0  # by hand: 1 argument; index -1 returns device +0x1A08, others +0x1A04 / +0x1A0C
+D3DDevice_GetVertexShader                            = 0x2DDD50  # by hand: 1 argument; stores device +0x794, the handle D3DDevice_SetVertexShader 0x2DE4C4 keeps; callers 0x25F9D5 and 0x260715
+D3DDevice_GetPixelShader                             = 0x2E42B0  # by hand: 1 argument; stores device +0x780, the handle D3DDevice_SetPixelShader 0x2E4658 keeps; callers 0x25F9F5 and 0x260721
+D3DDevice_SetStipple                                 = 0x2DA0C0  # by hand: 1 argument; copies 32 dwords to device +0x196C and pushes them with method 0x1480
+D3DDevice_GetDepthStencilSurface2                    = 0x2D9200  # by hand: returns device +0x19F8 after AddRef, 0 when none
+D3DDevice_GetRasterStatus                            = 0x2D8E40  # by hand: 1 argument; reads the scanline from GPU register 0x600808 into {InVBlank, ScanLine}
+D3DDevice_GetRenderTarget2                           = 0x2D91E0  # by hand: returns device +0x19F4 after AddRef
+D3DDevice_GetTile                                    = 0
+D3DDevice_GetVertexShaderFunction                    = 0
+D3DDevice_InsertFence                                = 0x2D88A0  # by hand: no arguments; calls D3D_SetFence(0)
+D3DDevice_IsFencePending                             = 0x2DCA20
+D3DDevice_LightEnable                                = 0x2D9710  # by hand: 2 arguments; lights at device +0x7A0, stride 0x90; calls SetLight 0x2D9450 with a default light
+D3DDevice_LoadVertexShader                           = 0x2DE0A0  # by hand: 2 arguments; SetVertexShader 0x2DE462 calls it before SelectVertexShader; pushes 0x1E9C (program load)
+D3DDevice_LoadVertexShaderProgram                    = 0
+D3DDevice_MakeSpace                                  = 0x2DCF30  # by hand: the push buffer refill: the render state setters call it when push >= threshold (+4)
+D3DDevice_PersistDisplay                             = 0
+D3DDevice_Release                                    = 0x2D86C0  # by hand: no arguments; reference count at device +0x934, destroys the device at 1
+D3DDevice_SelectVertexShader                         = 0x2DE100
+D3DDevice_SetFlickerFilter                           = 0
+D3DDevice_SetGammaRamp                               = 0x2D8310  # by hand: 2 arguments; copies 0x300 bytes to device +0x1DF4 + index * 0x300
+D3DDevice_SetIndices                                 = 0x2D9A50  # by hand: stores the index buffer at device +0x79C and BaseVertexIndex at +0x1C
+D3DDevice_SetLight                                   = 0x2D9450
+D3DDevice_SetMaterial                                = 0x2D85C0  # by hand: 1 argument; copies 17 dwords to device +0xEF0, dirty 0x9000
+D3DDevice_SetPalette                                 = 0
+D3DDevice_SetPixelShader                             = 0x2E4640
+D3DDevice_SetPixelShaderConstant                     = 0x2E4840
+D3DDevice_SetRenderState_BackFillMode                = 0x2DAAD0
+D3DDevice_SetRenderState_CullMode                    = 0x2DA760
+D3DDevice_SetRenderState_DoNotCullUncompressed       = 0x2DB8C0  # by hand: 1 argument; stores render state 165 (D3D_RenderState + 0x294)
+D3DDevice_SetRenderState_Dxt1NoiseEnable             = 0x2DA920  # by hand: 1 argument; stores render state 159 (D3D_RenderState + 0x27c)
+D3DDevice_SetRenderState_EdgeAntiAlias               = 0x2DA690
+D3DDevice_SetRenderState_FillMode                    = 0x2DAA80
+D3DDevice_SetRenderState_FogColor                    = 0x2DA710
+D3DDevice_SetRenderState_FrontFace                   = 0x2DA7D0
+D3DDevice_SetRenderState_LineWidth                   = 0x2DA8B0
+D3DDevice_SetRenderState_LogicOp                     = 0x2DAA20
+D3DDevice_SetRenderState_MultiSampleAntiAlias        = 0x2DB940  # by hand: 1 argument; stores render state 152 (D3D_RenderState + 0x260)
+D3DDevice_SetRenderState_MultiSampleMask             = 0x2DB9C0
+D3DDevice_SetRenderState_MultiSampleMode             = 0x2DB8E0  # by hand: 1 argument; stores render state 154 (D3D_RenderState + 0x268)
+D3DDevice_SetRenderState_MultiSampleRenderTargetMode = 0x2DB910  # by hand: 1 argument; stores render state 155 (D3D_RenderState + 0x26c)
+D3DDevice_SetRenderState_NormalizeNormals            = 0x2DA810
+D3DDevice_SetRenderState_OcclusionCullEnable         = 0x2DB7A0  # by hand: 1 argument; stores render state 161 (D3D_RenderState + 0x284)
+D3DDevice_SetRenderState_PSTextureModes              = 0x2DA360  # by hand: 1 argument; stores render state 136 (D3D_RenderState + 0x220)
+D3DDevice_SetRenderState_RopZCmpAlwaysRead           = 0x2DB880  # by hand: 1 argument; stores render state 163 (D3D_RenderState + 0x28c)
+D3DDevice_SetRenderState_RopZRead                    = 0x2DB8A0  # by hand: 1 argument; stores render state 164 (D3D_RenderState + 0x290)
+D3DDevice_SetRenderState_SampleAlpha                 = 0x2DBA10
+D3DDevice_SetRenderState_ShadowFunc                  = 0x2DA6D0
+D3DDevice_SetRenderState_Simple                      = 0x2DA390
+D3DDevice_SetRenderState_StencilCullEnable           = 0x2DB810  # by hand: 1 argument; stores render state 162 (D3D_RenderState + 0x288)
+D3DDevice_SetRenderState_StencilEnable               = 0x2DB670  # by hand: 1 argument; stores render state 144 (D3D_RenderState + 0x240)
+D3DDevice_SetRenderState_StencilFail                 = 0x2DB700
+D3DDevice_SetRenderState_TextureFactor               = 0x2DA850  # by hand: 1 argument; stores render state 148 (D3D_RenderState + 0x250)
+D3DDevice_SetRenderState_TwoSidedLighting            = 0x2DAB30
+D3DDevice_SetRenderState_VertexBlend                 = 0x2DABB0
+D3DDevice_SetRenderState_YuvEnable                   = 0x2DB770  # by hand: 1 argument; stores render state 160 (D3D_RenderState + 0x280)
+D3DDevice_SetRenderState_ZEnable                     = 0x2DB5E0  # by hand: 1 argument; stores render state 143 (D3D_RenderState + 0x23c)
+D3DDevice_SetRenderStateNotInline                    = 0x2DA3C0
+D3DDevice_SetRenderTarget                            = 0x2D8B70  # by hand: 2 arguments (ret 8); pushes depth test (0x30C) and stencil (0x32C), calls the target switch 0x2DB280
+D3DDevice_SetRenderTargetFast                        = 0
+D3DDevice_SetScissors                                = 0
+D3DDevice_SetScreenSpaceOffset                       = 0x2DA070  # by hand: stores x and y + 0.53125 at device +0xEE8 and +0xEEC
+D3DDevice_SetShaderConstantMode                      = 0x2DE1C0
+D3DDevice_SetSoftDisplayFilter                       = 0
+D3DDevice_SetStreamSource                            = 0x2DDFD0
+D3DDevice_SetTexture                                 = 0x2D98A0
+D3DDevice_SetTextureStageStateNotInline              = 0x2DAE00  # by hand: 3 arguments; stores the deferred texture state [stage * 32 + type], dirty bit 1 << stage
+D3DDevice_SetTextureState_BorderColor                = 0x2DAD80
+D3DDevice_SetTextureState_BumpEnv                    = 0x2DAD10  # by hand: 3 arguments (ret 0xC); pushes 0x1AD0 + (stage * 16 + type) * 4, stores the deferred texture state [stage * 32 + type]
+D3DDevice_SetTextureState_ColorKeyColor              = 0x2DADC0
+D3DDevice_SetTextureState_TexCoordIndex              = 0x2DAC00
+D3DDevice_SetTile                                    = 0
+D3DDevice_SetTransform                               = 0x2D83D0  # by hand: copies 16 dwords to device +0xC50 + type * 64; D3D_InitDefaultState calls it for types 0-9
+D3DDevice_SetVertexShader                            = 0x2DE430
+D3DDevice_SetVertexShaderConstant1                   = 0x2DDD70
+D3DDevice_SetVertexShaderConstant1Fast               = 0
+D3DDevice_SetVertexShaderConstant4                   = 0x2DDDD0
+D3DDevice_SetVertexShaderConstantNotInlineFast       = 0x2DDE80
+D3DDevice_SetViewport                                = 0x2D9220  # by hand: stores X, Y, Width, Height, MinZ, MaxZ at device +0xED0 to +0xEE4
+D3DDevice_Swap                                       = 0x2DC4C0  # by hand: default flags 5, swap count at device +0x2468; the game calls it at 0x3654C
+D3DDevice_SwitchTexture                              = 0
+D3DResource_BlockUntilNotBusy                        = 0x2DD3C0
+D3DResource_IsBusy                                   = 0x2DD300
+Direct3D_CreateDevice                                = 0x2E7F20
+DirectSoundCreate                                    = 0x3A185F
+DirectSoundCreateBuffer                              = 0
+DirectSoundCreateStream                              = 0x3A18A6
+DirectSoundDoWork                                    = 0x3A025C
+DirectSoundUseFullHRTF                               = 0
+DirectSoundUseLightHRTF                              = 0x39E797
+getsockname                                          = 0
+getsockopt                                           = 0
+IDirectSound_CommitDeferredSettings                  = 0x3A13E9
+IDirectSound_CommitEffectData                        = 0
+IDirectSound_CreateSoundBuffer                       = 0x3A1651
+IDirectSound_GetCaps                                 = 0x39FF3F  # by hand: 2 arguments; xtlid B003E, copies the library's free voice and page counts (0x3AAD38..0x3AAD50) into DSCAPS; the sound engine 0x23EECB checks the free pages
+IDirectSound_CreateSoundStream                       = 0x3A1675  # by hand: 4 arguments (ret 0x10), XACT 0x3AF224 calls it beside CreateSoundBuffer for streamed sounds
+IDirectSound_DownloadEffectsImage                    = 0x39FF5B
+IDirectSound_EnableHeadphones                        = 0
+IDirectSound_GetEffectData                           = 0
+IDirectSound_GetOutputLevels                         = 0
+IDirectSound_GetSpeakerConfig                        = 0
+IDirectSound_Release                                 = 0x39E766
+IDirectSound_SetDistanceFactor                       = 0
+IDirectSound_SetDopplerFactor                        = 0
+IDirectSound_SetEffectData                           = 0x39FF82
+IDirectSound_SetI3DL2Listener                        = 0x3A1699
+IDirectSound_SetMixBinHeadroom                       = 0x39FFAC
+IDirectSound_SetOrientation                          = 0
+IDirectSound_SetPosition                             = 0
+IDirectSound_SetRolloffFactor                        = 0
+IDirectSound_SetVelocity                             = 0
+IDirectSound_SynchPlayback                           = 0x39FFCC
+IDirectSoundBuffer_GetCurrentPosition                = 0x3A0144
+IDirectSoundBuffer_GetStatus                         = 0x3A0128
+IDirectSoundBuffer_GetVoiceProperties                = 0x3A01B0  # by hand: 2 arguments, xtlid B0055; DSVOICEPROPS from the voice processor, XACT 0x3AF627 reads it applying a volume
+IDirectSoundBuffer_Lock                              = 0x3A0180
+IDirectSoundBuffer_Pause                             = 0
+IDirectSoundBuffer_Play                              = 0x3A00A8
+IDirectSoundBuffer_Release                           = 0x39E781
+IDirectSoundBuffer_SetAllParameters                  = 0
+IDirectSoundBuffer_SetBufferData                     = 0x3A0EE8
+IDirectSoundBuffer_SetCurrentPosition                = 0x3A0164
+IDirectSoundBuffer_SetEG                             = 0x3A0038
+IDirectSoundBuffer_SetFilter                         = 0x3A0054
+IDirectSoundBuffer_SetFormat                         = 0x3A0ECC
+IDirectSoundBuffer_SetFrequency                      = 0x3A082F
+IDirectSoundBuffer_SetHeadroom                       = 0x3A0070
+IDirectSoundBuffer_SetI3DL2Source                    = 0
+IDirectSoundBuffer_SetLoopRegion                     = 0x3A0108
+IDirectSoundBuffer_SetMaxDistance                    = 0
+IDirectSoundBuffer_SetMinDistance                    = 0
+IDirectSoundBuffer_SetMixBins                        = 0x3A0867
+IDirectSoundBuffer_SetMixBinVolumes                  = 0x3A008C
+IDirectSoundBuffer_SetOutputBuffer                   = 0x3A084B
+IDirectSoundBuffer_SetPlayRegion                     = 0x3A0883
+IDirectSoundBuffer_SetPosition                       = 0
+IDirectSoundBuffer_SetRolloffCurve                   = 0
+IDirectSoundBuffer_SetVelocity                       = 0
+IDirectSoundBuffer_SetVolume                         = 0x39FFE4
+IDirectSoundBuffer_Stop                              = 0x3A00CC
+IDirectSoundBuffer_StopEx                            = 0x3A00E4
+IDirectSoundBuffer_Unlock                            = 0x39E77C
+IDirectSoundStream_SetEG                             = 0x3A0213
+IDirectSoundStream_GetVoiceProperties                = 0x3A0244  # by hand: 2 arguments, xtlid B0081, jmp 0x39FE4B; XACT 0x3AF632 reads it applying a volume
+ioctlsocket                                          = 0x34AD76
+listen                                               = 0x34ADA6
+Lock2DSurface                                        = 0x2E0760
+recv                                                 = 0x34ADE5
+recvfrom                                             = 0x34ADFF
+select                                               = 0x34ADBC
+send                                                 = 0x34AE0E
+sendto                                               = 0x34AE28
+setsockopt                                           = 0x34AD81
+shutdown                                             = 0x34AD6B
+socket                                               = 0x34AD55
+WSACancelOverlappedIO                                = 0x34ADDA
+WSAGetLastError                                      = 0x34B255
+WSAGetOverlappedResult                               = 0x34ADCB
+WSARecv                                              = 0x34ADF0
+WSARecvFrom                                          = 0
+WSASend                                              = 0x34AE19
+WSASendTo                                            = 0x34AE37
+WSACleanup                                           = 0x34B1C5
+WSAStartup                                           = 0x34B0CA
+XAudioDownloadEffectsImage                           = 0
+XInitDevices                                         = 0x3D0236
+XInputClose                                          = 0x3D1DE7
+XInputGetState                                       = 0x3D1DF3
+XInputOpen                                           = 0x3D1D91
+XInputSetState                                       = 0x3D1E66
+XLaunchNewImageA                                     = 0x038CD4
+XMountUtilityDrive                                   = 0x03A21F
+XNetCreateKey                                        = 0x34ACBA
+XNetDnsLookup                                        = 0x34ACF2
+XNetDnsRelease                                       = 0x34AD09
+XNetGetEthernetLinkStatus                            = 0x258F60
+XNetGetTitleXnAddr                                   = 0x34AD4A
+XNetInAddrToXnAddr                                   = 0x34AE80
+XNetRandom                                           = 0x34ACAF
+XNetRegisterKey                                      = 0x34ACC5
+XNetCleanup                                          = 0x34B1B8
+XNetStartup                                          = 0x34B0B3
+XNetUnregisterKey                                    = 0x34ACD0
+XNetXnAddrToInAddr                                   = 0x34ACDB
+XOnlineCleanup                                       = 0x35D8F3
+XOnlineStartup                                       = 0x35D808
+
+[data]
+D3D_DeferredTextureState    = 0x2FBA20  # by hand: [stage * 32 + type] dwords, written at 0x2DAD66; ends where D3D_RenderState starts
+D3D_Device                  = 0x2FBEC0
+D3D_DirtyFlags              = 0x2FBA18  # by hand: D3DDevice_SetTexture 0x2D9927 ors 0x4800 into it, D3DDevice_SelectVertexShader 0x2DE128 ors 0x70
+D3D_FvfShader               = 0x2FE530  # by hand: D3DDevice_SetVertexShader 0x2DE477 loads the FVF shader object, 0x2DE4BE stores it at device +0x790
+D3D_IndexData               = 0x2FBA14  # by hand: D3DDevice_SetIndices 0x2D9A69 stores the buffer data, 0x2D9A70 clears it
+D3D_pDevice                 = 0x2FBEB8
+D3D_RenderState             = 0x2FBC20  # by hand: D3DDevice_SetPixelShader insn 63 (0x2E472F) loads it, as in 5849
+D3D_SimpleRenderStateEncode = 0x3D88C8
+D3D_Streams                 = 0x2FE358
+DSound_StreamVtable         = 0x400F08
+DSound_StreamVtable2        = 0x400EF8
+XPP_GamepadType             = 0x3CF8B4
+XPP_MemoryUnitType          = 0x3CF838
+
+
+# the audio chip's 48 kHz sample counter (0xFE80200C), read directly by XACT and XPP; src/game/hooks.cpp supplies it
+[[hook]]
+at = 0x003B1120
+call = "ApuCounterEax"
+on_true = 0x003B1125
+
+[[hook]]
+at = 0x003D70CF
+call = "ApuCounterEbx"
+on_true = 0x003D70D5
+
+
+# movie open diagnostics, src/game/hooks.cpp logs each step of 0x1CF280
+[[hook]]
+at = 0x001CF2B7
+call = "LogMovieOpen"
+
+[[hook]]
+at = 0x001CF2BC
+call = "LogMovieCreateFile"
+
+[[hook]]
+at = 0x001CF305
+call = "LogMovieReadFile"
+
+[[hook]]
+at = 0x001CF30E
+call = "LogMovieLastError"
+
+[[hook]]
+at = 0x001CF33F
+call = "LogMovieOverlapped"
+
+[[hook]]
+at = 0x001CF377
+call = "LogMovieDecoder"
+
+# argument locations in API order for functions a link time code generated library compiled with another
+# convention: a register (eax ebx ecx edx esi edi ebp) or "stack" for the next stack slot, which the callee pops
+[abi]
+
+# diagnostics: the title's heap failing an allocation, before it reboots through d:\boom.xbe
+[[hook]]
+at = 0x0006F3AD
+call = "LogHeapFull"
+

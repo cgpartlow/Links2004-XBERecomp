@@ -1,0 +1,52 @@
+# XDK 5558 library data layouts, Links 2004 (default.xbe, title 4D53005D).
+# Started from 5849. Every line says VERIFIED (read from Links code at the address given) or
+# UNVERIFIED. Against 5849 the device is 4 bytes shorter from +0x790 and 0x10 shorter from +0xC50 on;
+# the UNVERIFIED device lines past +0xC50 carry that -0x10 shift.
+[layout]
+CDevice_Push               = 0x0000  # VERIFIED same as 5849, D3DDevice_SetTexture 0x2D98A0
+CDevice_PushThreshold      = 0x0004  # VERIFIED same as 5849, D3DDevice_SetTexture 0x2D98A0
+CDevice_BaseVertex         = 0x001c  # VERIFIED D3DDevice_SetIndices 0x2D9AA9 stores BaseVertexIndex (same as 5849)
+CDevice_IndexBuffer        = 0x079c  # VERIFIED D3DDevice_SetIndices 0x2D9A7A reads the old one, 0x2D9AA2 stores the new one (5849: 0x7A0)
+CDevice_ZScale             = 0x0944  # VERIFIED 0x2DA4E4 and 0x2DA5C6 scale by it in the viewport math (5849: 0x948)
+CDevice_SuperSampleX       = 0x0958  # VERIFIED D3DDevice_SetViewport 0x2D9332 scales X by it (5849: 0x95C)
+CDevice_SuperSampleY       = 0x095c  # VERIFIED D3DDevice_SetViewport 0x2D9386 scales Y by it (5849: 0x960)
+CDevice_Transforms         = 0x0c50  # VERIFIED D3DDevice_SetTransform 0x2D83E6 copies 16 dwords to +0xC50 + type * 64 (5849: 0xC60)
+CDevice_Textures           = 0x0f78  # VERIFIED D3DDevice_SetTexture 0x2D98B0 reads, 0x2D98E9 stores [stage] (5849: 0xF88)
+CDevice_Palettes           = 0x0f88  # UNVERIFIED guess, 5849 0xf98 - 0x10
+CDevice_RenderTarget       = 0x19f4  # VERIFIED D3DDevice_GetRenderTarget2 0x2D91E6 returns it (5849: 0x1A04)
+CDevice_Depth              = 0x19f8  # VERIFIED D3DDevice_GetDepthStencilSurface2 0x2D9206 returns it (5849: 0x1A08)
+CDevice_BackBuffer         = 0x1a04  # VERIFIED the render target switch 0x2DB28E compares the render target with it (5849: 0x1A14)
+CDevice_FrontBuffer        = 0x1a08  # VERIFIED D3DDevice_GetBackBuffer2 0x2D8DF0 returns it for index -1 (5849: 0x1A18)
+CDevice_SwapCount          = 0x2468  # VERIFIED D3DDevice_Swap 0x2DC520 increments it (5849: 0x2478)
+CDevice_Size               = 0x2490  # VERIFIED Direct3D_CreateDevice 0x2E7F9B clears 0x924 dwords (5849: 0x24A0)
+CDevice_Flags              = 0x0008  # VERIFIED same as 5849, Direct3D_CreateDevice 0x2E7F20 / D3DDevice_SetPixelShader
+CDevice_Time               = 0x002c  # VERIFIED D3D_KickOffAndWaitForIdle 0x2DCF95 passes it to D3D_BlockOnTime, D3D_SetFence 0x2DCBE4 reads it (same as 5849)
+CDevice_PixelShader        = 0x0784  # VERIFIED same as 5849, D3DDevice_SetPixelShader
+CDevice_VertexShader       = 0x0790  # VERIFIED D3DDevice_SetVertexShader 0x2DE441 reads the object, 0x2DE4BE stores it (5849: 0x794)
+CDevice_VertexShaderHandle = 0x0794  # VERIFIED D3DDevice_SetVertexShader 0x2DE4C4 stores the handle, D3DDevice_GetVertexShader 0x2DDD50 reads it
+CDevice_PixelShaderHandle  = 0x0780  # VERIFIED D3DDevice_SetPixelShader 0x2E4658 stores the handle, D3DDevice_GetPixelShader 0x2E42B0 reads it
+CDevice_BackBufferScale    = 0x0968  # VERIFIED the frame buffer init 0x2DF2CB stores the X scale, 0x2DF2E4 the Y scale at +4 (5849: 0x96C)
+CDevice_Viewport           = 0x0ed0  # VERIFIED D3DDevice_SetViewport 0x2D93D0 to 0x2D93FC stores X, Y, Width, Height, MinZ, MaxZ (5849: 0xEE0)
+CDevice_ScreenSpaceOffset  = 0x0ee8  # VERIFIED D3DDevice_SetScreenSpaceOffset 0x2DA083 stores x + 0.53125, 0x2DA093 y at +4 (5849: 0xEF8)
+CDevice_AutoDepth          = 0x1a10  # VERIFIED D3D_InitDefaultState 0x2DF057 reads it (5849: 0x1A20)
+CDevice_VBlankCallback     = 0x1da8  # VERIFIED D3DDevice_SetVerticalBlankCallback 0x2D878A stores it (5849: 0x1DB8)
+CDevice_VBlankEvent        = 0x1dac  # VERIFIED D3DDevice_BlockUntilVerticalBlank 0x2D87DD waits on it, 0x2D87CB clears its SignalState (5849: 0x1DBC)
+CDevice_DisplayFlags       = 0x1dcc  # VERIFIED D3DDevice_GetDisplayFieldStatus 0x2D9C5D tests it for 0x1200000 (5849: 0x1DDC)
+CDevice_VBlankCount        = 0x1dd8  # VERIFIED D3DDevice_GetDisplayFieldStatus 0x2D9C50 reads it (5849: 0x1DE8)
+CDevice_Field              = 0x1de8  # VERIFIED D3DDevice_GetDisplayFieldStatus 0x2D9C6F reads it (5849: 0x1DF8)
+CDevice_GammaRamps         = 0x1df4  # VERIFIED D3DDevice_GetGammaRamp 0x2D83A0 and SetGammaRamp 0x2D8340 copy at +0x1DF4 + index * 0x300 (5849: 0x1E04)
+CDevice_GammaPending       = 0x23f4  # UNVERIFIED guess, 5849 0x2404 - 0x10
+DirtyFlags_Texture         = 0x4800  # VERIFIED same as 5849, D3DDevice_SetTexture 0x2D98A0
+TextureState_Stage         = 0x0020  # UNVERIFIED, 5849 value
+Stream_Size                = 0x000c  # VERIFIED same as 5849, D3DDevice_SetStreamSource
+Stream_Stride              = 0x0000  # VERIFIED same as 5849, D3DDevice_SetStreamSource
+Stream_Buffer              = 0x0008  # VERIFIED same as 5849, D3DDevice_SetStreamSource
+PixelShader_Definition     = 0x0008  # VERIFIED same as 5849, D3DDevice_SetPixelShader
+CDirectSoundStream_Vtable  = 0x0000  # UNVERIFIED, 5849 value
+CDirectSoundStream_Vtable2 = 0x0004  # UNVERIFIED, 5849 value
+EffectsImage_Skip0         = 0x0804  # UNVERIFIED, 5849 value
+EffectsImage_Skip1         = 0x080c  # UNVERIFIED, 5849 value
+EffectsImage_Desc          = 0x0818  # UNVERIFIED, 5849 value
+XPP_Current                = 0x0000  # UNVERIFIED, 5849 value
+XPP_Changed                = 0x0004  # UNVERIFIED, 5849 value
+XPP_Previous               = 0x0008  # UNVERIFIED, 5849 value
