@@ -28,7 +28,7 @@ The port's settings are in the game's own menus, under **Options > Graphics > PC
 | **Frame Rate** | 30, 60 (default), the monitor's refresh rate, 120, 144, 165, 240 or Unlimited, for the menus and rounds alike. **Original** plays as the Xbox did: menus at 60 and rounds at 30. |
 | **FPS Counter** | Shows the frame rate in the top left corner. |
 | **V-Sync** | On by default. |
-| **Overscan** | Trims a little from each edge of the picture, as a TV did. The game was drawn with that in mind, and some main menu course pictures leave a stray column at the left edge without it. |
+| **Overscan** | Trims a little from each edge of the picture, as a CRT TV did. The game was drawn with that in mind, and some main menu course pictures leave a stray column at the left edge without it. |
 | **Render Scale** | Renders the game at 0.5x to 2x the output resolution, for supersampling or for speed. |
 | **Anti-Aliasing** | Off, FXAA or SMAA, over the finished frame. SMAA keeps text and fine detail sharper. |
 | **Texture Filter** | Forces 2x to 16x anisotropic filtering on all textures. |
