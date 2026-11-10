@@ -32,6 +32,7 @@
 #include "app/app.h"
 #include "core/diag.h"
 #include "core/log.h"
+#include "gpu/aa.h"
 #include "gpu/backend.h"
 #include "gpu/ext.h"
 #include "gpu/shaders.h"
@@ -534,7 +535,7 @@ private:
         if (t.range != 1 && ext_) ext_->Resolve(*this, t);
     }
     // Pass, then its step
-    void Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3D12_CPU_DESCRIPTOR_HANDLE rh, uint32_t w,
+    bool Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3D12_CPU_DESCRIPTOR_HANDLE rh, uint32_t w,
               uint32_t h, ID3D12Resource* const src[3], const DXGI_FORMAT fmt[3], const float p[8],
               float blend) override;
     ID3D12PipelineState* EnsurePassPipeline(const char* hlsl, const char* entry, DXGI_FORMAT rtv, float blend);
@@ -616,7 +617,7 @@ private:
     void ResizeSwap();
     void UploadGammaRamp();
     void DrawFrame(Target* t, uint32_t bi);
-    void BlitFrame(Target& t);
+    void BlitFrame(Target& t, D3D12_CPU_DESCRIPTOR_HANDLE rh);
     void RenderUi();
     void ReleaseOldTextures();
     void ResetFrame();
@@ -762,6 +763,7 @@ private:
     uint8_t ramp_[768] = {};
     bool ramp_dirty_ = false;
     bool gamma_ = false;
+    PostAA aa_;  // FXAA or SMAA over the frame before BlitFrame scales it (Settings::anti_aliasing)
     Target* bound_rt_ = nullptr;
     Target* bound_ds_ = nullptr;
     Target* draw_rt_ = nullptr;  // the draw's targets, the bound ones go when a texture's copy is drawn
@@ -1505,11 +1507,11 @@ ID3D12PipelineState* D3D12Backend::EnsurePassPipeline(const char* hlsl, const ch
     return pso.Get();
 }
 
-void D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3D12_CPU_DESCRIPTOR_HANDLE rh,
+bool D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3D12_CPU_DESCRIPTOR_HANDLE rh,
                         uint32_t w, uint32_t h, ID3D12Resource* const src[3], const DXGI_FORMAT fmt[3],
                         const float p[8], float blend) {
     ID3D12PipelineState* pso = EnsurePassPipeline(hlsl, entry, rtv, blend);
-    if (!pso) return;
+    if (!pso) return false;
     uint32_t slot = AllocSrvSlots(4);
     for (int i = 0; i < 4; i++) {
         D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
@@ -1530,6 +1532,7 @@ void D3D12Backend::Pass(const char* hlsl, const char* entry, DXGI_FORMAT rtv, D3
     }
     DrawFullScreen(pso, cb.gpu, slot);
     bound_rt_ = bound_ds_ = nullptr;
+    return true;
 }
 
 // a copy of the target to read while drawing to it
@@ -3333,7 +3336,13 @@ void D3D12Backend::UploadGammaRamp() {
     cl_->CopyTextureRegion(&dl, 0, 0, 0, &sl, nullptr);
 }
 
-void D3D12Backend::BlitFrame(Target& t) {
+void D3D12Backend::BlitFrame(Target& t, D3D12_CPU_DESCRIPTOR_HANDLE rh) {
+    Transition(t.res.Get(), t.state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // anti-aliasing at the frame's own size, before it is scaled; its passes leave their own targets bound
+    DXGI_FORMAT fmt = t.fmt;
+    ID3D12Resource* src = aa_.Apply(*this, t.res.Get(), fmt, t.w, t.h, app::Get().anti_aliasing);
+    cl_->OMSetRenderTargets(1, &rh, FALSE, nullptr);
+    bound_rt_ = bound_ds_ = nullptr;
     // 16:9 when the console reports a widescreen display, else 4:3
     bool wide = app::Widescreen();
     float aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
@@ -3349,8 +3358,7 @@ void D3D12Backend::BlitFrame(Target& t) {
     cl_->RSSetViewports(1, &vp);
     cl_->RSSetScissorRects(1, &scissor);
     binds_ = {};
-    Transition(t.res.Get(), t.state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    Blit(t.res.Get(), t.fmt, uv, {.gamma = gamma_});
+    Blit(src, fmt, uv, {.gamma = gamma_});
 }
 
 void D3D12Backend::RenderUi() {
@@ -3373,7 +3381,7 @@ void D3D12Backend::DrawFrame(Target* t, uint32_t bi) {
     cl_->ClearRenderTargetView(rh, black, 0, nullptr);
     cl_->OMSetRenderTargets(1, &rh, FALSE, nullptr);
     bound_rt_ = bound_ds_ = nullptr;
-    if (t) BlitFrame(*t);
+    if (t) BlitFrame(*t, rh);
     RenderUi();
     Transition(bb_[bi].Get(), bs, D3D12_RESOURCE_STATE_PRESENT);
 }

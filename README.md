@@ -17,16 +17,33 @@ The latest version can be downloaded from the [Releases](../../releases) page.
 The executable checks that your `default.xbe` is the version it was made from, and tells you if it is not.
 
 ## Features
-### Display
-- **Display Mode**: Fullscreen, Borderless (default) or Windowed.
-- **Resolution**: Any resolution, defaulting to your desktop resolution instead of the original 640x480.
-- **Render Resolution**: Renders the game at a percentage of the output resolution, for supersampling or for speed.
-- **Max Frame Rate**: A frame rate cap, or none.
-- **V-Sync**: On by default.
-- **Overscan**: Trims a little from each edge of the picture, as a TV did. The game was drawn with that in mind, and some main menu course pictures leave a stray column at the left edge without it.
+### PC GRAPHICS Menu
+The port's settings are in the game's own menus, under **Options > Graphics > PC GRAPHICS**, from the main menu or the pause menu during a round. Left and Right (or A) change the selected setting, and every change is saved at once. The list scrolls, with the game's own scroll arrows.
+
+| Setting | What it does |
+|---|---|
+| **Monitor** | The monitor the game shows on, numbered left to right as Windows places them. |
+| **Display** | Fullscreen, Borderless (default) or Windowed. |
+| **Resolution** | Any of the monitor's resolutions, defaulting to the desktop's instead of the original 640x480. |
+| **Frame Rate** | 30, 60 (default), the monitor's refresh rate, 120, 144, 165, 240 or Unlimited, for the menus and rounds alike. **Original** plays as the Xbox did: menus at 60 and rounds at 30. |
+| **FPS Counter** | Shows the frame rate in the top left corner. |
+| **V-Sync** | On by default. |
+| **Overscan** | Trims a little from each edge of the picture, as a TV did. The game was drawn with that in mind, and some main menu course pictures leave a stray column at the left edge without it. |
+| **Render Scale** | Renders the game at 0.5x to 2x the output resolution, for supersampling or for speed. |
+| **Anti-Aliasing** | Off, FXAA or SMAA, over the finished frame. SMAA keeps text and fine detail sharper. |
+| **Texture Filter** | Forces 2x to 16x anisotropic filtering on all textures. |
+| **LOD Distance** | How far away objects keep their full detail and stay drawn, up to 4x the original, for less pop-in. |
+| **Grass Distance** | How far ahead the 3D grass reaches, up to 3x the original. |
+| **Skip Intro** | Starts the game at PRESS START, leaving out the legal screens, the logo movies and the intro. |
+
+### Experimental
+Features still being tried out are under **Options > Graphics > EXPERIMENTAL**.
+
+- **Upscaled UI**: The menus, HUD and fonts upscaled 4x with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN), for sharp text and icons at high resolutions. **BUILD UPSCALED UI** closes the game and upscales the textures from your own copy of the game, on your PC, then starts the game again. Nothing of the game's is shared or downloaded. The first time, it asks to download Real-ESRGAN's official Windows release (45 MB) into `tools\realesrgan` beside the exe, and checks it before using it. The images go into `textures\generated\ui`, and **UPSCALED UI** turns them on and off at any time. Building needs a GPU with Vulkan support.
 
 ### Graphics
-- **Anisotropic Filtering**: Forces an anisotropic filtering level on all textures.
+- **Higher Frame Rates**: Rounds run past the Xbox's 30 FPS, with aiming, the camera and D-pad aiming kept at the original speed.
+- **Widescreen Menu Backgrounds**: The PC GRAPHICS and EXPERIMENTAL screens have the Graphics menu's widescreen bars during a round.
 - **Texture Replacement**: Replaces the game's textures with `.dds` or `.png` images in the `textures\replacement` folder beside the exe.
 - **Texture Dumping**: Saves every texture the game uses into `textures\dumps` beside the exe, as PNG or DDS.
 
@@ -39,6 +56,7 @@ The executable checks that your `default.xbe` is the version it was made from, a
 
 ### Input
 - **Controller**: Xbox, PlayStation and Switch controllers, with hot plugging and rumble.
+- **Quit from the Main Menu**: B on the main menu asks "Are you sure you want to quit?" and closes the game on YES.
 
 ### Miscellaneous
 - **Boot Splash**: Place a `splash.png` (or `.bmp`) beside the exe to display a splash screen at launch.
@@ -48,14 +66,22 @@ Settings are kept in `settings.toml` beside the exe. It is written on the first 
 
 | Setting | Values |
 |---|---|
+| `monitor` | the monitor's device name (`\\.\DISPLAY2`), `""` for the primary |
 | `display_mode` | `"fullscreen"`, `"borderless"`, `"windowed"` |
 | `width`, `height` | output resolution, `0` for your desktop's |
-| `render_percent` | render resolution, percent of the output |
-| `fps_cap` | frame rate cap, `0` for none |
+| `render_percent` | render resolution, percent of the output (`50` to `200`) |
+| `fps_cap` | frame rate cap, `0` for none, `1` for the monitor's refresh rate (default `60`) |
+| `original_frame_rate` | `true` plays as the Xbox did: menus at 60 FPS, rounds at 30 |
+| `fps_counter` | `true` or `false` |
 | `vsync` | `true` or `false` |
 | `overscan` | tenths of a percent trimmed from each edge, `0` to `50` (default `10`) |
+| `anti_aliasing` | `"off"`, `"fxaa"` or `"smaa"` |
 | `anisotropic_filtering` | `0` (as the game asks), `2`, `4`, `8` or `16` |
-| `custom_textures` | `true` or `false` |
+| `lod_distance` | percent of the game's detail distances: `100`, `150`, `200`, `300` or `400` |
+| `grass_distance` | percent of the game's grass distance: `100`, `150`, `200` or `300` |
+| `skip_intro` | `true` starts at PRESS START |
+| `custom_textures` | `true` or `false`: images in `textures\replacement` |
+| `generated_textures` | `true` or `false`: images in `textures\generated`, such as the upscaled UI |
 | `dump_textures` | `true` or `false` |
 | `texture_dump_format` | `0` PNG, `1` DDS |
 | `join_ip` | a system link host past your LAN that the session search should also ask |
@@ -96,14 +122,16 @@ Install [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) and 
 Run `release.bat`, which needs [7-Zip](https://www.7-zip.org). It writes `Links2004-XBERecomp.zip`, containing the executable, the bundled compiler and an empty `assets` folder. It contains no game files and no game code.
 
 ## Repository Layout
-- `src/game`: the hooks that replace or patch the game's functions.
-- `src/common`: the game's description for the runtime, and the custom soundtrack support.
+- `src/game`: the hooks that replace or patch the game's functions, among them the PC GRAPHICS and EXPERIMENTAL menus (`pc_graphics.cpp`).
+- `src/common`: the game's description for the runtime, the custom soundtrack support and the UI upscaler (`ui_upscale.cpp`, with `zip_read.cpp` for the game's packs).
 - `config/game.toml`: the recompiler's config, with function and data addresses in the game's executable.
 - `sdk`: the Xbox XBE Recomp recompiler and runtime, with the changes this port needed.
 
 ## Credits
 - [TGP482](https://github.com/TGP482) for [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp), the recompiler and runtime this port is built on.
 - [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) for the overridable function layout and instruction hooks.
+- [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al. for the SMAA anti-aliasing.
+- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) by Xintao Wang et al. for the upscaled UI. It is downloaded on your PC when you build the upscaled UI, and is not part of this project.
 - [Zydis](https://github.com/zyantific/zydis) for decoding x86 instructions, [toml++](https://github.com/marzer/tomlplusplus) for the configs, [Dear ImGui](https://github.com/ocornut/imgui) for the overlay and [SDL](https://github.com/libsdl-org/SDL) for the window, input and controllers.
 
 ## License

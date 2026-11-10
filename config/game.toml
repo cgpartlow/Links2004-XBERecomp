@@ -324,6 +324,80 @@ call = "LogMovieOverlapped"
 at = 0x001CF377
 call = "LogMovieDecoder"
 
+# PC GRAPHICS in the Graphics Options menu, src/game/pc_graphics.cpp: the menu's scene as Rui_ReadLuaFile runs it,
+# its layout just after it ran, and the string table after its load read the file
+[[hook]]
+at = 0x00043A01
+call = "PatchLuaFile"
+
+[[hook]]
+at = 0x00043A06
+call = "LuaFileRan"
+
+[[hook]]
+at = 0x00057FA0
+call = "PatchStringTable"
+
+# rounds past 30 FPS: the main loop's wait for a second vertical blank is skipped unless FRAME RATE is ORIGINAL
+[[hook]]
+at = 0x001F058B
+call = "UnlockGameFps"
+on_true = 0x001F05A2
+
+# the aim marker's stick movement, per frame in the game: scaled to the frame's time (src/game/pc_graphics.cpp)
+[[hook]]
+at = 0x00125D19
+call = "ScaleAimMove"
+
+[[hook]]
+at = 0x00125E09
+call = "ScaleAimMoveTurn"
+
+[[hook]]
+at = 0x00125E20
+call = "ScaleCameraTurn"
+
+# the PC GRAPHICS screen (XLiveFeedbackMenu): its init keeps the LIVE and XSN logos hidden
+[[hook]]
+at = 0x000A84B7
+call = "HidePcLogos"
+
+# ...and its in-round background, as its geometry loads: the widescreen bars the Graphics Options menu has
+[[hook]]
+at = 0x00265C50
+call = "PcGeometryLoad"
+
+[[hook]]
+at = 0x002657F5
+call = "PcGeometryMesh"
+
+# PC GRAPHICS > LOD DISTANCE: the objects' detail distance multiplier, just after the camera's update worked it out
+[[hook]]
+at = 0x00125983
+call = "ScaleLodDistance"
+
+# PC GRAPHICS > GRASS DISTANCE: the sphere the 3D grass is gathered in, its index buffer and its stop
+[[hook]]
+at = 0x00171962
+call = "ScaleGrassSphere"
+
+[[hook]]
+at = 0x001719DF
+call = "ScaleGrassSphere"
+
+[[hook]]
+at = 0x0014BB2D
+call = "GrowGrassIndices"
+
+[[hook]]
+at = 0x0014E4A3
+call = "GrassIndexRoom"
+on_true = 0x0014E4AF
+
+[[hook]]
+at = 0x0014E462
+call = "GrassMeshesFull"
+
 # argument locations in API order for functions a link time code generated library compiled with another
 # convention: a register (eax ebx ecx edx esi edi ebp) or "stack" for the next stack slot, which the callee pops
 [abi]
@@ -333,3 +407,19 @@ call = "LogMovieDecoder"
 at = 0x0006F3AD
 call = "LogHeapFull"
 
+# PC GRAPHICS > SKIP INTRO, src/game/pc_graphics.cpp: the boot goes past the legal screens and its movies, from the
+# start to the loading screen and from there to PRESS START, with the intro marked as played
+[[hook]]
+at = 0x00037BD0
+call = "SkipLegalScreen"
+on_true = 0x00037BDB
+
+[[hook]]
+at = 0x00036BD2
+call = "SkipLegalScreens"
+on_true = 0x00036C4E
+
+[[hook]]
+at = 0x00036CA7
+call = "SkipBootMovies"
+on_true = 0x00036DB0

@@ -53,20 +53,27 @@ using Clock = std::chrono::steady_clock;
 
 // the settings as Update latched them, the render thread's
 struct Latched {
-    bool replacing = false;
+    bool replacing = false;  // custom_textures: textures\replacement
+    bool generated = false;  // generated_textures: textures\generated, packs a tool of the game made on this PC
     bool dumping = false;
     uint32_t format = 0;
     bool operator==(const Latched&) const = default;
+};
+
+// a pack folder's change handle, tried again now and then while the folder is missing
+struct Watch {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    uint32_t tries = 0;
 };
 
 struct Pack {
     Latched set;
     uint32_t generation = 1;
     fs::path pack_dir;
+    fs::path generated_dir;
     fs::path dump_dir;
     std::unordered_map<uint64_t, fs::path> files;  // by the key in their names; written by Update alone
-    HANDLE watch = INVALID_HANDLE_VALUE;           // changes under pack_dir
-    uint32_t watch_tries = 0;
+    Watch watch[2];                                // changes under pack_dir and generated_dir
     std::optional<Clock::time_point> changed;      // the last change seen, not listed yet
     std::once_flag worker;
     std::mutex lock;                               // everything below
@@ -173,17 +180,29 @@ std::string Utf8(const fs::path& p) {
     return std::string(s.begin(), s.end());
 }
 
-void ListPack(const fs::path& dir) {
-    g.files.clear();
+// every image under dir with a key in its name; one already listed under that key stays unless over
+void ListFolder(const fs::path& dir, bool over) {
+    size_t before = g.files.size();
+    size_t found = 0;
     std::error_code ec;
     fs::recursive_directory_iterator it(dir, ec);
     for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
         const fs::path& p = it->path();
         bool image = _wcsicmp(p.extension().c_str(), L".dds") == 0 || _wcsicmp(p.extension().c_str(), L".png") == 0;
         uint64_t key = image ? KeyInName(p.stem().wstring()) : 0;
-        if (key) g.files.emplace(key, p);
+        if (!key) continue;
+        found++;
+        if (over) g.files.insert_or_assign(key, p);
+        else g.files.emplace(key, p);
     }
-    LOGR("texture pack: %zu images in %s", g.files.size(), Utf8(dir).c_str());
+    LOGR("texture pack: %zu images in %s (%zu new keys)", found, Utf8(dir).c_str(), g.files.size() - before);
+}
+
+// the generated packs first, then the replacement folder, whose images win over theirs
+void ListPack() {
+    g.files.clear();
+    if (g.set.generated) ListFolder(g.generated_dir, false);
+    if (g.set.replacing) ListFolder(g.pack_dir, true);
 }
 
 // DDS files
@@ -488,14 +507,17 @@ Image Decode(const TextureDesc& d, const uint8_t* guest, const uint32_t* palette
     return img;
 }
 
-// the settings into g.set; false when none changed
+// the settings into g.set; false when none changed. A change of which packs are on lists them again at once.
 bool LatchSettings() {
     const app::Settings& s = app::Get();
-    Latched now{s.custom_textures, s.dump_textures, s.texture_dump_format};
+    Latched now{s.custom_textures, s.generated_textures, s.dump_textures, s.texture_dump_format};
     if (now == g.set) return false;
+    bool packs = now.replacing != g.set.replacing || now.generated != g.set.generated;
     g.set = now;
+    if (packs) g.changed = Clock::time_point{};
     fs::path root = app::ExeDir() / "textures";
     g.pack_dir = root / "replacement";
+    g.generated_dir = root / "generated";
     if (now.dumping) {
         g.dump_dir = root / "dumps";
         std::error_code ec;
@@ -509,30 +531,33 @@ bool LatchSettings() {
     return true;
 }
 
-// the pack folder's change handle, tried again now and then while the folder is missing; once made the pack is
+// a pack folder's change handle, tried again now and then while the folder is missing; once made the packs are
 // listed at once
-void EnsureWatch() {
-    if (g.watch != INVALID_HANDLE_VALUE || g.watch_tries++ % kWatchRetry) return;
-    g.watch = FindFirstChangeNotificationW(g.pack_dir.c_str(), TRUE, kPackChanges);
-    if (g.watch != INVALID_HANDLE_VALUE) g.changed = Clock::time_point{};
+void EnsureWatch(Watch& w, const fs::path& dir) {
+    if (w.handle != INVALID_HANDLE_VALUE || w.tries++ % kWatchRetry) return;
+    w.handle = FindFirstChangeNotificationW(dir.c_str(), TRUE, kPackChanges);
+    if (w.handle != INVALID_HANDLE_VALUE) g.changed = Clock::time_point{};
 }
 
-void NoteFolderChange(Clock::time_point now) {
-    if (g.watch == INVALID_HANDLE_VALUE || WaitForSingleObject(g.watch, 0) != WAIT_OBJECT_0) return;
+void NoteFolderChange(Watch& w, Clock::time_point now) {
+    if (w.handle == INVALID_HANDLE_VALUE || WaitForSingleObject(w.handle, 0) != WAIT_OBJECT_0) return;
     g.changed = now;
-    if (FindNextChangeNotification(g.watch)) return;
-    FindCloseChangeNotification(g.watch);  // the folder went away
-    g.watch = INVALID_HANDLE_VALUE;
+    if (FindNextChangeNotification(w.handle)) return;
+    FindCloseChangeNotification(w.handle);  // the folder went away
+    w.handle = INVALID_HANDLE_VALUE;
 }
 
-// lists the pack once its folder is watched, then again once its files changed and settled; true when listed
+// lists the packs once their folders are watched, then again once their files changed and settled; true when listed
 bool UpdatePackFiles() {
     Clock::time_point now = Clock::now();
-    EnsureWatch();
-    NoteFolderChange(now);
+    const fs::path* dirs[2] = {&g.pack_dir, &g.generated_dir};
+    for (int i = 0; i < 2; i++) {
+        EnsureWatch(g.watch[i], *dirs[i]);
+        NoteFolderChange(g.watch[i], now);
+    }
     if (!g.changed || now - *g.changed < kSettle) return false;
     g.changed.reset();
-    ListPack(g.pack_dir);
+    ListPack();
     std::lock_guard l(g.lock);
     g.revision++;
     g.asked.clear();
@@ -544,23 +569,64 @@ bool UpdatePackFiles() {
 
 bool Update() {
     bool changed = LatchSettings();
-    bool reloaded = g.set.replacing && UpdatePackFiles();
+    // with both packs off the list is emptied, so turning one on lists it anew
+    bool on = g.set.replacing || g.set.generated;
+    bool reloaded = on && UpdatePackFiles();
+    if (!on && !g.files.empty()) {
+        g.files.clear();
+        reloaded = true;
+    }
     if (changed || reloaded) g.generation++;
     return reloaded;
 }
 
 uint32_t Generation() { return g.generation; }
 
-bool Replacing() { return g.set.replacing && !g.files.empty(); }
+bool Replacing() { return (g.set.replacing || g.set.generated) && !g.files.empty(); }
 
-uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, const uint32_t* palette) {
-    if (!Replacing() && !g.set.dumping) return 0;
+uint64_t ImageKey(const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
     // cube maps, volumes and depth stay the console's; linear ones are movie frames and the game's own copies
-    if (d.cube || d.depth > 1 || d.linear || UploadFormat(fi.host) == DXGI_FORMAT_UNKNOWN) return 0;
+    if (d.cube || d.depth > 1 || d.linear || UploadFormat(Format(d.format).host) == DXGI_FORMAT_UNKNOWN) return 0;
     uint32_t shape[] = {d.format, d.width, d.height};
     uint64_t key = Hash(guest, LevelSize(d, 0), Hash(shape, sizeof(shape)));
     if (palette) key = Hash(palette, kPaletteBytes, key);
     return key ? key : 1;
+}
+
+uint64_t Key(const TextureDesc& d, const FormatInfo&, const uint8_t* guest, const uint32_t* palette) {
+    if (!Replacing() && !g.set.dumping) return 0;
+    return ImageKey(d, guest, palette);
+}
+
+bool DecodeBgra(const TextureDesc& d, const uint8_t* guest, const uint32_t* palette, std::vector<uint8_t>& bgra) {
+    if (d.cube || d.depth > 1 || UploadFormat(Format(d.format).host) == DXGI_FORMAT_UNKNOWN) return false;
+    TextureDesc top = d;
+    top.levels = 1;
+    Image img = Decode(top, guest, palette);
+    IWICImagingFactory* wic = Wic();
+    std::vector<uint8_t> dds;
+    ComPtr<IWICBitmapSource> source;
+    if (!wic || img.levels.empty() || FAILED(LevelZeroBitmap(wic, img, dds, source))) return false;
+    bgra.assign(size_t(d.width) * d.height * 4, 0);
+    return SUCCEEDED(source->CopyPixels(nullptr, d.width * 4, UINT(bgra.size()), bgra.data()));
+}
+
+bool WritePngFile(const std::filesystem::path& path, uint32_t width, uint32_t height, const std::vector<uint8_t>& bgra) {
+    if (bgra.size() < size_t(width) * height * 4) return false;
+    std::error_code ec;
+    fs::remove(path, ec);  // WritePng keeps a file that is there
+    Image img{DXGI_FORMAT_B8G8R8A8_UNORM, width, height, {Level{bgra, width * 4}}};
+    WritePng(path, img);
+    return fs::exists(path, ec);
+}
+
+bool ReadPngFile(const std::filesystem::path& path, uint32_t& width, uint32_t& height, std::vector<uint8_t>& bgra) {
+    Image img;
+    if (!ReadPng(path, img)) return false;
+    width = img.width;
+    height = img.height;
+    bgra = std::move(img.levels[0].px);
+    return true;
 }
 
 void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {

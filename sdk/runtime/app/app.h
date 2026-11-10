@@ -17,6 +17,9 @@ enum class DisplayMode : uint32_t { Fullscreen, Borderless, Windowed };
 inline constexpr uint32_t kFpsCapRefresh = 1;  // fps_cap: the monitor's refresh rate
 
 struct Settings {
+    // the monitor the game goes on, its device name (\\.\DISPLAY2); empty is wherever the window is, the primary at
+    // first. Read and written under MonitorLock: the render thread reads it each frame.
+    std::string monitor;
     DisplayMode display_mode = DisplayMode::Borderless;
     uint32_t width = 0, height = 0;  // 0 is the desktop mode
     uint32_t render_percent = 100;   // of the output height
@@ -26,7 +29,9 @@ struct Settings {
     uint32_t overscan = 10;
     bool vsync = true;
     uint32_t aniso = 0;              // 0 as the game asks
+    uint32_t anti_aliasing = 0;      // over the finished frame: 0 off, 1 FXAA, 2 SMAA (gpu/aa.h)
     bool custom_textures = true;     // images in textures\replacement\ beside the exe replace the game's
+    bool generated_textures = true;  // and those in textures\generated\, packs the game's own tools made on this PC
     bool dump_textures = false;      // each texture once into textures\dumps\ beside the exe
     uint32_t texture_dump_format = 0;  // 0 PNG, 1 DDS
     std::string join_ip;                   // co-op: a host past the LAN the system link search also asks
@@ -41,6 +46,16 @@ void ApplyDisplay();  // any thread
 struct Mode {
     uint32_t width, height;
 };
+// the monitors attached to the desktop, left to right
+struct Monitor {
+    std::string device;      // \\.\DISPLAYn, as Settings::monitor holds it
+    uint32_t width, height;  // its current mode
+    bool primary;
+    void* handle;            // HMONITOR
+};
+std::vector<Monitor> Monitors();
+std::mutex& MonitorLock();  // around Settings::monitor
+void* GameMonitor();         // HMONITOR: Settings::monitor's when it is attached, else the window's
 Mode Desktop();
 Mode Output();
 float RenderScale(uint32_t guest_height);
