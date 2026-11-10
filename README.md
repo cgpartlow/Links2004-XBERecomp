@@ -43,10 +43,7 @@ Features still being tried out are under **Options > Graphics > EXPERIMENTAL**.
 
 ### Graphics
 - **Higher Frame Rates**: Rounds run past the Xbox's 30 FPS, with aiming, the camera and D-pad aiming kept at the original speed.
-- **Widescreen Menu Backgrounds**: The PC GRAPHICS and EXPERIMENTAL screens have the Graphics menu's widescreen bars during a round.
-- **Texture Replacement**: Replaces the game's textures with `.dds` or `.png` images in the `textures\replacement` folder beside the exe.
-- **Texture Dumping**: Saves every texture the game uses into `textures\dumps` beside the exe, as PNG or DDS.
-
+  
 ### Audio
 - **Custom Soundtracks**: The Xbox let you rip CDs to the hard drive and play them in games. Here, put folders of music in the `soundtracks` folder beside the exe. Each folder becomes a soundtrack, and loose files become one called "Music". MP3, WMA, M4A, AAC, FLAC and WAV are supported. New songs are converted when the game starts, with a progress window. They then show up in the game's Sound options under Soundtracks.
 
@@ -60,31 +57,6 @@ Features still being tried out are under **Options > Graphics > EXPERIMENTAL**.
 
 ### Miscellaneous
 - **Boot Splash**: Place a `splash.png` (or `.bmp`) beside the exe to display a splash screen at launch.
-
-## Settings
-Settings are kept in `settings.toml` beside the exe. It is written on the first start, and you can edit it while the game is closed.
-
-| Setting | Values |
-|---|---|
-| `monitor` | the monitor's device name (`\\.\DISPLAY2`), `""` for the primary |
-| `display_mode` | `"fullscreen"`, `"borderless"`, `"windowed"` |
-| `width`, `height` | output resolution, `0` for your desktop's |
-| `render_percent` | render resolution, percent of the output (`50` to `200`) |
-| `fps_cap` | frame rate cap, `0` for none, `1` for the monitor's refresh rate (default `60`) |
-| `original_frame_rate` | `true` plays as the Xbox did: menus at 60 FPS, rounds at 30 |
-| `fps_counter` | `true` or `false` |
-| `vsync` | `true` or `false` |
-| `overscan` | tenths of a percent trimmed from each edge, `0` to `50` (default `10`) |
-| `anti_aliasing` | `"off"`, `"fxaa"` or `"smaa"` |
-| `anisotropic_filtering` | `0` (as the game asks), `2`, `4`, `8` or `16` |
-| `lod_distance` | percent of the game's detail distances: `100`, `150`, `200`, `300` or `400` |
-| `grass_distance` | percent of the game's grass distance: `100`, `150`, `200` or `300` |
-| `skip_intro` | `true` starts at PRESS START |
-| `custom_textures` | `true` or `false`: images in `textures\replacement` |
-| `generated_textures` | `true` or `false`: images in `textures\generated`, such as the upscaled UI |
-| `dump_textures` | `true` or `false` |
-| `texture_dump_format` | `0` PNG, `1` DDS |
-| `join_ip` | a system link host past your LAN that the session search should also ask |
 
 ## System Requirements
 ### Minimum
