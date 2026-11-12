@@ -1,4 +1,7 @@
+#include <cstdlib>
+
 #include "app/app.h"
+#include "common/direct_connect.h"
 #include "common/ui_upscale.h"
 
 namespace links {
@@ -8,12 +11,23 @@ extern bool g_original_fps;         // pc_graphics.cpp: PC GRAPHICS > FRAME RATE
 extern uint32_t g_lod_percent;      // pc_graphics.cpp: PC GRAPHICS > LOD DISTANCE, percent of the game's
 extern uint32_t g_grass_percent;    // pc_graphics.cpp: PC GRAPHICS > GRASS DISTANCE, percent of the game's
 extern bool g_skip_intro;           // pc_graphics.cpp: PC GRAPHICS > SKIP INTRO
+extern bool g_animation_log;        // pc_graphics.cpp: a diagnostic, animation timing into the log
+extern bool g_smooth_animation;     // pc_graphics.cpp: EXPERIMENTAL > SMOOTH ANIMATION
+extern bool g_hitch_log;            // pc_graphics.cpp: a diagnostic, long frames into the log
 void DrawPcOverlay(double fps);     // pc_graphics.cpp: the FPS counter
+
+// the game window is up: DIRECT CONNECT's font before the renderer builds the font atlas, then the soundtracks
+void Window(void* hwnd) {
+    LoadDirectConnectFont();
+    StartSoundtracks(hwnd);
+}
 
 // started with --upscale-ui (EXPERIMENTAL > BUILD UPSCALED UI): this run is the UI upscaler, which starts the game
 // again when it is done and never returns
 void Init() {
     if (UpscaleUiAsked()) RunUiUpscale();
+    // hitch_log also turns on the renderer's timing log (XBE_PERF, read once when the renderer first asks)
+    if (g_hitch_log) _putenv("XBE_PERF=1");
 }
 }
 
@@ -31,14 +45,17 @@ const app::GameInfo app::kGame = {
                 {"original_frame_rate", &links::g_original_fps, nullptr},
                 {"lod_distance", nullptr, &links::g_lod_percent},
                 {"grass_distance", nullptr, &links::g_grass_percent},
-                {"skip_intro", &links::g_skip_intro, nullptr}},
+                {"skip_intro", &links::g_skip_intro, nullptr},
+                {"animation_log", &links::g_animation_log, nullptr},
+                {"smooth_animation", &links::g_smooth_animation, nullptr},
+                {"hitch_log", &links::g_hitch_log, nullptr}},
     .load = nullptr,                      // reads more from the settings file's toml::table
     .save = nullptr,                      // writes more into it
     .init = links::Init,                  // after the settings load, before the window and boot
     .loaded = nullptr,                    // image in memory, before its entry point runs
-    .window = links::StartSoundtracks,    // the game window is up
+    .window = links::Window,              // the game window is up
     .message = nullptr,                   // window messages first; true takes one
     .ui = links::DrawPcOverlay,           // ImGui drawing each frame
-    .pad = nullptr,                       // changes a polled pad
+    .pad = links::DirectConnectPad,       // changes a polled pad
     .rumble = nullptr,                    // changes a rumble before it is set
 };

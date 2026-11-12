@@ -56,23 +56,38 @@
 //   (0x8C070), the in-round background, the player's controller (+0x30, which its B method checks) and the button list
 //   (+0x28). The two status grids (Online, VoiceMask) and the LIVE logos stay hidden. Its Left and Right (0xAB590,
 //   0xAB620) changed the Live state: they do nothing, and the glue changes the selected setting instead.
+// - SMOOTH ANIMATION: the animation clips are keyed 30 times a second, and a clip is applied (AnimClip's 0x1622F0)
+//   either blended between the two keyframes around its time or, for most animations (the golfers' reactions, the
+//   crowd), as the earlier keyframe alone, which looks 30 FPS at any frame rate. On, every clip is applied blended.
 // - UPSCALED UI turns the upscaled menu textures (textures\generated\ui, the runtime's generated texture pack) on and
 //   off. BUILD UPSCALED UI asks first, then closes the game and starts this exe as the upscaler (ui_upscale.cpp), which
 //   starts the game again when it is done.
+//
+// DIRECT CONNECT: a third item in the MULTIPLAYER menu (XOnlineMenu, its list at +0x28), under Xbox Live and System
+// Link. Its scene gets the item; its A method (0x974F0) does nothing past the second, and the glue opens the address
+// window (common/direct_connect.cpp) instead. The menu shows an icon for the selected item (0x97110 finds it by the
+// item's number: LIVE, SYSTEMLINK, then the unused XSN and ADDFRIEND): the third shows SYSTEMLINK's, and the XSN icon,
+// which only the menu's init used to hide, is hidden in its layout.
 //
 // Quitting from the main menu: XMainMenu.scene has no B, and the main menu's B method (vtable 0x3E12E0, +0x0C) is the
 // shared empty one. The scene gets B and Back ("OnHitBButton()", the glue 0x791E0), whose override asks with the
 // game's own message box (the menu manager's 0x7DCE0, as the pause menu asks before quitting a round) and closes the
 // window on YES, as Alt+F4 does. The main menu's help lines get "B QUIT".
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <initializer_list>
 #include <iterator>
+#include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -86,6 +101,7 @@
 #include <windows.h>
 
 #include "app/app.h"
+#include "common/direct_connect.h"
 #include "common/ui_upscale.h"
 #include "core/log.h"
 #include "imgui.h"
@@ -98,6 +114,9 @@ bool g_original_fps = false;   // settings file original_frame_rate: rounds at t
 uint32_t g_lod_percent = 100;  // settings file lod_distance: the objects' detail distances, 100 as the game has them
 uint32_t g_grass_percent = 100;  // settings file grass_distance: how far the 3D grass reaches, 100 as the game has it
 bool g_skip_intro = false;  // settings file skip_intro: boot goes from the loading screen straight to PRESS START
+bool g_animation_log = false;  // settings file animation_log: a diagnostic, each animation's timing into the log (ProbeAnimation)
+bool g_hitch_log = false;  // settings file hitch_log: a diagnostic, long frames and what ran during them (HitchFrame)
+bool g_smooth_animation = false;  // settings file smooth_animation: EXPERIMENTAL > SMOOTH ANIMATION (sub_001622F0)
 }
 
 namespace {
@@ -135,6 +154,8 @@ constexpr uint32_t kIngameBackgroundName = 0x003E2CD8;  // "IngameBackground"
 constexpr uint32_t kLiveLogosName = 0x003E224C;       // "PreGameLiveLogos"
 constexpr uint32_t kOnlineName = 0x003E3444;          // "Online", a status grid
 constexpr uint32_t kVoiceMaskName = 0x003E3438;       // "VoiceMask", the other
+constexpr uint32_t kOnlineVtable = 0x003E1DE0;        // XOnlineMenu (MULTIPLAYER), set by its constructor 0x97090
+constexpr uint32_t kDirectConnectItem = 2;            // index in its list: Xbox Live 0, System Link 1
 
 // The scene as the original builds it (Scenes.XGraphicsOptionsMenu, decompiled), with the second and third items and A
 // added
@@ -162,7 +183,8 @@ const char kGraphicsScene[] = R"lua(Scenes.XGraphicsOptionsMenu = {
 )lua";
 
 // The EXPERIMENTAL screen's scene, in place of XLiveStatusMenu's (decompiled: B, Back, Left and Right on the control,
-// two items) with this screen's items and A
+// two items) with this screen's items and A. Its layout had two buttons (Item1, Item2, and ItemLast, the one a list
+// scrolls into view); ExperimentalLayoutPatch and AddListSlot give it a third, so all three items show.
 const char kExperimentalScene[] = R"lua(Scenes.XLiveStatusMenu = {
 	Controls = {
 		{
@@ -176,9 +198,9 @@ const char kExperimentalScene[] = R"lua(Scenes.XLiveStatusMenu = {
 			Items = {
 				AButton = "OnHitAButton()",
 				Start = "OnHitAButton()",
-				Enabled = { true, true },
-				HelpIDs = { "HelpPCExp1", "HelpPCExp2" },
-				TextIDs = { "PCExp1", "PCExp2" },
+				Enabled = { true, true, true },
+				HelpIDs = { "HelpPCExp1", "HelpPCExp2", "HelpPCExp3" },
+				TextIDs = { "PCExp1", "PCExp2", "PCExp3" },
 			},
 		},
 	},
@@ -307,6 +329,47 @@ const char kMainScene[] = R"lua(Scenes.XMainMenu = {
 		{ SceneName = "XMainMenu" },
 	},
 }
+)lua";
+
+// MULTIPLAYER's scene (Scenes.XOnlineMenu, decompiled) with DIRECT CONNECT added; its four Enabled were always there
+const char kOnlineScene[] = R"lua(Scenes.XOnlineMenu = {
+	Controls = {
+		{
+			DefaultInput = "ListProcessInput",
+			Down = "ListSelNext()",
+			Up = "ListSelPrevious()",
+			Items = {
+				AButton = "OnHitAButton()",
+				AButtonDisabled = "$Disabled",
+				BButton = "OnHitBButton()",
+				BButtonDisabled = "OnHitBButton()",
+				Back = "OnHitBButton()",
+				BackDisabled = "OnHitBButton()",
+				Enabled = { true, true, true, true },
+				HelpIDs = "HelpSystemLink",
+				Start = "OnHitAButton()",
+				StartDisabled = "$Disabled",
+				TextIDs = { "OnlineButton1", "OnlineButton2", "PCDirectConnect" },
+			},
+		},
+	},
+	DefaultAction = "$SetupMenu",
+}
+)lua";
+
+// Run after MULTIPLAYER's sceneData: the XSN icon (a child of the menu, Graph.Children[2]) hidden, as the menu's init
+// hid it when it went through all four icons
+const char kOnlinePatch[] = R"lua(
+do
+	local graph = SceneData and SceneData.Graph
+	local menu = graph and graph.Children and graph.Children[2]
+	if menu and menu.Children then
+		for i = 1, 64 do
+			local c = menu.Children[i]
+			if c and c.Name == "XSN" then c.Visible = false end
+		end
+	end
+end
 )lua";
 
 // Run after the graphics menu's sceneData: the second and third list slots ("Item2", "Item3") get the button template
@@ -546,6 +609,102 @@ bool WireArrows(std::vector<uint8_t>& code, uint16_t first_id) {
     });
 }
 
+// The EXPERIMENTAL screen's third button. Its list ("ButtonList") shows the slots under its "items" node but the last,
+// ItemLast, which is where an item scrolls in from: Item1 at y 10.8, Item2 at -24.2, ItemLast at -60.0. Run after the
+// sceneData: a new slot, Item3, with its button template, takes ItemLast's place and ItemLast moves a row down. Then
+// the in-round background (kBackgroundPatch). No function calls (see SlotPatch).
+constexpr float kExpSlotX = -91.4826f, kExpSlot3Y = -60.0375f, kExpSlotLastY = -95.5f;
+const char kExpSlot[] = "Item3";
+const char kExpSlotTemplate[] = "MainButton_TMP3:Menu";
+const char kExpSlotText[] = "MainButton_TMP3:MainMenuTMP_TextTop";
+
+std::string ExperimentalLayoutPatch() {
+    return std::string(R"lua(
+do
+	local graph = SceneData and SceneData.Graph
+	local menu = graph and graph.Children and graph.Children[2]
+	local list = nil
+	if menu and menu.Children then
+		for i = 1, 64 do
+			local c = menu.Children[i]
+			if c and c.Name == "ButtonList" and c.Type == "List" then list = c end
+		end
+	end
+	local items = list and list.Children and list.Children[1]
+	local last = items and items.Children and items.Children[3]
+	if last and last.Name == "ItemLast" and not items.Children[4] then
+		last.LPM = )lua") + LuaBytes({kExpSlotX, kExpSlotLastY, 0}) + R"lua(
+		items.Children[4] = last
+		items.Children[3] = {
+			Children = {
+				{
+					ChangedAttributes = {},
+					ClassType = "",
+					Flags = 0,
+					HasRotation = false,
+					HasShear = false,
+					HasTranslation = false,
+					IsAnimated = false,
+					Name = "MainButton_TMP3:Menu",
+					TemplateName = "MainButton_TMP",
+					Type = "Template",
+				},
+			},
+			ClassType = "",
+			Flags = 2,
+			HasRotation = false,
+			HasShear = false,
+			HasTranslation = false,
+			IsAnimated = false,
+			LPM = )lua" + LuaBytes({kExpSlotX, kExpSlot3Y, 0}) + R"lua(,
+			Name = "Item3",
+			Type = "Node",
+			Visible = true,
+		}
+		local types = SceneData.NodeTypes and SceneData.NodeTypes[0]
+		if types and types.Template then types.Template = types.Template + 1 end
+		if types and types.Node then types.Node = types.Node + 1 end
+	end
+end
+)lua" + kBackgroundPatch;
+}
+
+// ...its three nodes in the layout's NodeHierarchy (ids the old count + 1 to + 3) and its control in ControlData: a
+// fourth child of ButtonList (class 1), with the two children the other slots' controls have
+bool AddListSlot(std::vector<uint8_t>& code) {
+    uint16_t first_id = 0;
+    bool nodes = EditStringConstant(code, [&](const std::string& s, std::string& out) {
+        if (s.size() < 4 || s.find(Named("MainButton_TMP2:Menu")) == std::string::npos ||
+            s.find(Named("ItemLast")) == std::string::npos || s.find(Named(kExpSlot)) != std::string::npos)
+            return false;
+        uint16_t count = Get16(s, 0);
+        if (Get16(s, 2) != count) return false;
+        out = s;
+        for (const char* name : {kExpSlot, kExpSlotTemplate, kExpSlotText}) out += Named(name) + std::string(2, '\0');
+        Put16(out, 0, uint16_t(count + 3));
+        Put16(out, 2, uint16_t(count + 3));
+        first_id = uint16_t(count + 1);
+        return true;
+    });
+    return nodes && EditStringConstant(code, [&](const std::string& s, std::string& out) {
+        std::string key = Named("ButtonList") + std::string("\x01\x00", 2);
+        size_t at = s.find(key);
+        if (s.size() < 4 || at == std::string::npos || s.find(Named("VoiceMask")) == std::string::npos ||
+            s.find(Named(kExpSlot)) != std::string::npos)
+            return false;
+        size_t kids = at + key.size() + 2;
+        if (kids + 2 > s.size()) return false;
+        out = s;
+        Put16(out, kids, uint16_t(Get16(s, kids) + 1));
+        std::string slot = Named(kExpSlot) + "\xFF\xFF" + Le16(first_id) + Le16(2) + Named("MainButton_TMP") +
+                           "\xFF\xFF" + Le16(uint16_t(first_id + 1)) + Le16(0) + Named("text") + "\xFF\xFF" +
+                           Le16(uint16_t(first_id + 2)) + Le16(0);
+        out.insert(kids + 2, slot);
+        Put16(out, 0, uint16_t(Get16(s, 0) + 3));
+        return true;
+    });
+}
+
 // Swaps the bytes Rui_ReadLuaFile is about to run ([esp], [esp + 4], and edi, which it frees after) for new ones
 bool ReplaceLuaFile(X86Context& ctx, const void* bytes, uint32_t size) {
     uint32_t mem = GameAlloc(ctx, size);
@@ -759,6 +918,9 @@ const Row kExperimentalRows[] = {
          app::Save();
          if (!links::StartUiUpscale()) LOGE("menu: the UI upscaler did not start");
      }},
+    // every animation blended between its 30 per second keyframes, as the swing always was (sub_001622F0)
+    {"SMOOTH ANIMATION", [] { return std::string(links::g_smooth_animation ? "ON" : "OFF"); },
+     [](int) { links::g_smooth_animation = !links::g_smooth_animation; }},
 };
 constexpr uint32_t kExperimentalRowCount = sizeof(kExperimentalRows) / sizeof(kExperimentalRows[0]);
 
@@ -911,11 +1073,13 @@ void SetPcStrings(Table& t) {
     SetString(t, "PCGfxBlank", u"", "HelpGraphicsOptions");
     // {_Left}{_Right} are 0x8D 0x8E, {_A} 0x13, {_BBack} 0x14 "BACK"
     SetString(t, "HelpPCGfx", u"\n\x8D\x8E" u"CHANGE \x14" u"BACK", "HelpGraphicsOptions");
+    SetString(t, "PCDirectConnect", u"DIRECT CONNECT", "OnlineButton2");
     SetString(t, "PCExperimentalButton", u"EXPERIMENTAL", "GraphicsOptionsButton1");
     SetString(t, "HelpPCExperimental", u"\n\x13" u"TRY FEATURES IN TESTING \x14" u"BACK", "HelpGraphicsOptions");
     SetString(t, "PCExpTitle", u"EXPERIMENTAL", "GraphicOptionsMenu_Title");
     SetString(t, "HelpPCExp1", u"\n\x8D\x8E" u"TURN UPSCALED UI ON OR OFF \x14" u"BACK", "HelpGraphicsOptions");
     SetString(t, "HelpPCExp2", u"\n\x13" u"UPSCALE THE UI ON THIS PC \x14" u"BACK", "HelpGraphicsOptions");
+    SetString(t, "HelpPCExp3", u"\n\x8D\x8E" u"BLEND ANIMATION KEYFRAMES \x14" u"BACK", "HelpGraphicsOptions");
     // the build question; each line short enough not to wrap (the box wraps at its own width)
     SetString(t, "PCBuildTitle", u"UPSCALE UI", "MessageWarning");
     SetString(t, "PCBuildBody", u"The game closes to upscale\nits menus, then restarts.", "MessageRestart");
@@ -1120,7 +1284,50 @@ uint32_t ControlList(X86Context& ctx, uint32_t control) {
 
 namespace links {
 // the FPS counter, in the top left corner (GameInfo::ui)
+std::atomic<uint32_t> g_frames_drawn{0};  // for ProbeAnimation: frames since its last report
+void HitchFrame();
+// The 3D camera's aspect, 0x4509F4, set once at boot (0x36039): 1.75 only for an HDTV AV pack with the widescreen
+// flag, else 1.5, which is what this PC's console reports (HalBootSMCVideoMode 0, a SCART pack) whatever the screen.
+// On a widescreen output it is the shape the frame is shown in (app::DisplayAspect), 16:9 or an ultrawide one.
+// Cameras take it as they are made (0x124AB9, the round's camera, into D3DXMatrixPerspectiveFovLH, whose field of
+// view is up and down), so a course is in proportion and an ultrawide one shows more at the sides at the same height.
+// Set every frame: the output can change while the game runs. A 4:3 output keeps the game's own.
+constexpr uint32_t kCameraAspect = 0x4509F4;
+constexpr float kWideAspect = 16.0f / 9.0f;
+void UpdateCameraAspect() {
+    if (!app::Widescreen()) return;
+    float want = app::DisplayAspect();
+    float* p = static_cast<float*>(::kernel::HostPtr(kCameraAspect));
+    if (*p < 1.0f || std::fabs(*p - want) < 1e-4f) return;  // not set by the boot yet
+    LOGR("widescreen: the camera's aspect %.3f is now %.3f", *p, want);
+    *p = want;
+}
+
+// ULTRAWIDE, out of a round: the menus were made for 16:9 and have art past its edges, so all but the middle 16:9 of
+// the frame is covered in black, overscan's share of that 16:9 too (Settings::overscan). In a round the course
+// fills the screen and the HUD keeps to its edges.
+void DrawUltrawideMask() {
+    float wide = app::DisplayAspect();
+    if (wide <= kWideAspect + 0.01f) return;
+    if (*static_cast<const uint8_t*>(::kernel::HostPtr(kInRound))) return;
+    // where the frame is on the screen and which part of it is shown, as the presenter has it (d3d12.cpp BlitFrame)
+    ImVec2 size = ImGui::GetIO().DisplaySize;
+    float vw = std::min(size.x, size.y * wide), vx = (size.x - vw) / 2;
+    float o = float(app::Get().overscan) / 1000.0f;
+    // the middle 16:9 of the frame, less overscan's share of it, from 0 to 1 across the frame
+    float c = kWideAspect / wide, left = (1 - c) / 2 + o * c, right = 1 - left;
+    float x0 = vx + (left - o) / (1 - 2 * o) * vw, x1 = vx + (right - o) / (1 - 2 * o) * vw;
+    ImDrawList* d = ImGui::GetBackgroundDrawList();
+    d->AddRectFilled(ImVec2(0, 0), ImVec2(std::floor(x0), size.y), IM_COL32(0, 0, 0, 255));
+    d->AddRectFilled(ImVec2(std::ceil(x1), 0), ImVec2(size.x, size.y), IM_COL32(0, 0, 0, 255));
+}
+
 void DrawPcOverlay(double fps) {
+    g_frames_drawn++;
+    UpdateCameraAspect();
+    DrawUltrawideMask();
+    if (g_hitch_log) HitchFrame();
+    DrawDirectConnect();
     if (!g_fps_counter) return;
     ImGui::SetNextWindowPos(ImVec2(8, 8));
     ImGui::SetNextWindowBgAlpha(0.45f);
@@ -1150,6 +1357,11 @@ void PatchLuaFile(X86Context& ctx, uint8_t*) {
     if (EndsWithNoCase(name, "XLiveFeedbackMenu.scene")) {
         if (ReplaceLuaFile(ctx, kPcScene, uint32_t(sizeof(kPcScene) - 1)))
             LOGR("menu: %s is the PC GRAPHICS screen", name.c_str());
+        return;
+    }
+    if (EndsWithNoCase(name, "XOnlineMenu.scene")) {
+        if (ReplaceLuaFile(ctx, kOnlineScene, uint32_t(sizeof(kOnlineScene) - 1)))
+            LOGR("menu: %s with DIRECT CONNECT", name.c_str());
         return;
     }
     if (EndsWithNoCase(name, "XLiveStatusMenu.scene")) {
@@ -1191,8 +1403,10 @@ void PatchLuaFile(X86Context& ctx, uint8_t*) {
     };
     if (status) {
         int changed = retext(kExperimentalLayoutText, std::size(kExperimentalLayoutText));
-        if (changed && ReplaceLuaFile(ctx, code.data(), uint32_t(code.size())))
-            LOGR("menu: %s, the title is EXPERIMENTAL's", name.c_str());
+        bool slot = AddListSlot(code);
+        if (!slot) LOGE("menu: %s is not laid out as expected, EXPERIMENTAL shows two items at a time", name.c_str());
+        if ((changed || slot) && ReplaceLuaFile(ctx, code.data(), uint32_t(code.size())))
+            LOGR("menu: %s, the title is EXPERIMENTAL's, third button %s", name.c_str(), slot ? "wired" : "left out");
         return;
     }
     int changed = retext(kPcLayoutText, std::size(kPcLayoutText));
@@ -1219,8 +1433,11 @@ void LuaFileRan(X86Context& ctx, uint8_t*) {
         lua = PcLayoutPatch();
         what = "scroll arrows and bars placed";
     } else if (EndsWithNoCase(n, "XLiveStatusMenu.sceneData")) {
-        lua = kBackgroundPatch;
-        what = "bars placed";
+        lua = ExperimentalLayoutPatch();
+        what = "third button and bars placed";
+    } else if (EndsWithNoCase(n, "XOnlineMenu.sceneData")) {
+        lua = kOnlinePatch;
+        what = "XSN icon hidden";
     } else {
         return;
     }
@@ -1413,6 +1630,16 @@ constexpr uint32_t kIntroPlayed = 0x004552FC;  // byte: the boot played the intr
 // 0x37BD0, about to show LegalScreen1: on true it is left out (to 0x37BDB, where the time it was shown is noted)
 bool SkipLegalScreen(X86Context&, uint8_t*) { return links::g_skip_intro; }
 
+// 0x65000, the menus' camera (0x64F70) about to set its projection (D3DXMatrixPerspectiveFovLH by vtable + 0x20):
+// [esp] its aspect. On an ultrawide display it is made as much wider as the display is than 16:9, the field of view
+// up and down kept, so menus and the HUD keep their 16:9 shape and place in the middle, the sides left to the course.
+void UltrawideMenuAspect(X86Context& ctx, uint8_t*) {
+    float wide = app::DisplayAspect();
+    if (wide <= 16.0f / 9.0f + 0.01f) return;
+    float* a = static_cast<float*>(::kernel::HostPtr(ctx.esp));
+    *a *= wide / (16.0f / 9.0f);
+}
+
 // 0x36BD2, the boot thread just started: on true, past the three waits and LegalScreen2 and 3, to ShortLoad (0x36C4E)
 bool SkipLegalScreens(X86Context&, uint8_t*) {
     if (links::g_skip_intro) LOGR("boot: SKIP INTRO, the legal screens, logo movies and intro are left out");
@@ -1563,7 +1790,8 @@ void PcGeometryMesh(X86Context& ctx, uint8_t*) {
     for (uint32_t i = 0; i < verts; i++) {
         uint32_t r = i / 4 < bar->count ? i / 4 : 0, c = i / 4 < bar->count ? i % 4 : 0;
         const Rect& rect = bar->rects[r];
-        float v[8] = {c == 0 || c == 3 ? -320.0f : 320.0f, c < 2 ? rect.bottom : rect.top, 0, 0, 0, 1, 0, 0};
+        // wide enough for any display: 16:9 is 640 across, an ultrawide one shows more at the sides
+        float v[8] = {c == 0 || c == 3 ? -1280.0f : 1280.0f, c < 2 ? rect.bottom : rect.top, 0, 0, 0, 1, 0, 0};
         uint8_t* p = static_cast<uint8_t*>(::kernel::HostPtr(vb + i * kColourStride));
         std::memcpy(p, v, 24);
         p[24] = kBarBgr[0];
@@ -1668,7 +1896,11 @@ X86_FUNC(sub_00079170) {
     bool graphics = IsGraphicsMenu(menu);
     uint32_t item = graphics ? Selection(menu) : 0;
     bool experimental = IsExperimentalMenu(menu);
+    bool direct = menu && ::kernel::R32(menu) == kOnlineVtable &&
+                  ListSelection(::kernel::R32(menu + 0x28)) == kDirectConnectItem;
     __imp__sub_00079170(ctx, base);
+    // the controller the game listens to: the GUI object's +0x11CC, the one whose START was pressed on PRESS START
+    if (direct) links::OpenDirectConnect(int(int8_t(*static_cast<const uint8_t*>(::kernel::HostPtr(::kernel::R32(kGui) + 0x11CC)))));
     if (graphics && item == kPcGraphicsItem) OpenMenu(ctx, kFeedbackName, "PC GRAPHICS");
     if (graphics && item == kExperimentalItem) OpenMenu(ctx, kStatusName, "EXPERIMENTAL");
     if (experimental) ChangeSetting(ctx, menu, kExperimentalScreen, 0);
@@ -1695,3 +1927,153 @@ X86_FUNC(sub_000793A0) {
     __imp__sub_000793A0(ctx, base);
     if (screen) ChangeSetting(ctx, menu, *screen, 1);
 }
+
+// XOnlineMenu's icon for an item (0x97110, thiscall (scene, item), ret 8): DIRECT CONNECT's is System Link's
+X86_EXTERN_FUNC(__imp__sub_00097110);
+X86_FUNC(sub_00097110) {
+    if (::kernel::R32(ctx.esp + 8) == kDirectConnectItem) ::kernel::W32(ctx.esp + 8, 1);
+    __imp__sub_00097110(ctx, base);
+}
+
+// EXPERIMENTAL > ANIMATION LOG, a diagnostic for animations that look 30 FPS at higher frame rates. Every animated
+// object's clip gets its time through AnimClip's 0x161AF0 (thiscall (float seconds, play state*), ret 8), which blends
+// between the clip's 30 per second keyframes, so a clip only steps when its time does. Each call is counted by who
+// made it (the return address and the code addresses above it on the stack); once a second the log gets, for each
+// caller: how many play states it drove, the calls, how many of them changed the time, and the smallest, mean and
+// largest change. Calls that change the time about 30 times a second while frames are drawn faster are the steppers.
+namespace {
+struct ProbeGroup {
+    uint32_t chain[5] = {};
+    std::map<uint32_t, float> last;  // play state -> its time at the last call
+    uint32_t calls = 0, changes = 0;
+    double sum = 0;
+    float least = 1e9f, most = 0;
+    uint32_t frames = 0;  // of the clip last seen
+};
+std::mutex g_probe_lock;
+std::map<uint64_t, ProbeGroup> g_probe;
+std::chrono::steady_clock::time_point g_probe_next;
+
+void ProbeAnimation(X86Context& ctx) {
+    uint32_t clip = ctx.ecx, state = ::kernel::R32(ctx.esp + 8);
+    float time;
+    std::memcpy(&time, ::kernel::HostPtr(ctx.esp + 4), 4);
+    // the callers: the return address, then what looks like return addresses above it
+    uint32_t chain[5] = {::kernel::R32(ctx.esp)};
+    int n = 1;
+    for (uint32_t at = ctx.esp + 12; n < 5 && at < ctx.esp + 0x300; at += 4) {
+        uint32_t v = ::kernel::R32(at);
+        if (v >= 0x00012000 && v < 0x003D8000 && v != chain[n - 1]) chain[n++] = v;
+    }
+    uint64_t key = 1469598103934665603ull;
+    for (uint32_t c : chain) key = (key ^ c) * 1099511628211ull;
+    std::lock_guard<std::mutex> l(g_probe_lock);
+    ProbeGroup& g = g_probe[key];
+    std::memcpy(g.chain, chain, sizeof chain);
+    g.calls++;
+    std::memcpy(&g.frames, ::kernel::HostPtr(clip + 0x1C), 4);
+    auto [it, fresh] = g.last.emplace(state, time);
+    if (!fresh && it->second != time) {
+        float d = std::abs(time - it->second);
+        g.changes++;
+        g.sum += d;
+        g.least = std::min(g.least, d);
+        g.most = std::max(g.most, d);
+        it->second = time;
+    }
+    auto now = std::chrono::steady_clock::now();
+    if (now < g_probe_next) return;
+    g_probe_next = now + std::chrono::seconds(1);
+    uint32_t frames = links::g_frames_drawn.exchange(0);
+    LOGR("anim: %u frames drawn, %u callers", frames, uint32_t(g_probe.size()));
+    for (auto& [k, p] : g_probe) {
+        float clip_frames;
+        std::memcpy(&clip_frames, &p.frames, 4);
+        if (p.calls)
+            LOGR("anim:   %08X < %08X < %08X < %08X < %08X: %u states, %u calls, %u changes, step %.4f / %.4f / %.4f s, "
+                 "clip %.0f frames",
+                 p.chain[0], p.chain[1], p.chain[2], p.chain[3], p.chain[4], uint32_t(p.last.size()), p.calls, p.changes,
+                 p.changes ? p.least : 0.0f, p.changes ? float(p.sum / p.changes) : 0.0f, p.most, clip_frames);
+    }
+    g_probe.clear();
+}
+}  // namespace
+
+X86_EXTERN_FUNC(__imp__sub_00161AF0);
+X86_FUNC(sub_00161AF0) {
+    if (links::g_animation_log) ProbeAnimation(ctx);
+    __imp__sub_00161AF0(ctx, base);
+}
+
+// EXPERIMENTAL > SMOOTH ANIMATION. AnimClip's 0x1622F0 (thiscall (float seconds, play state*, bool blend), ret 0x0C)
+// applies a clip at a time: with blend, the poses of the keyframes before and after it mixed by how far between them
+// the time is (0x162140's first half, through the clip's blend buffer at +0x154, made on first use); without, the
+// earlier keyframe's pose alone. Each animation of an object says which (a GameObject's flag byte per animation, a
+// MayaObject's flag 0x20), and most say without. On, all are blended.
+X86_EXTERN_FUNC(__imp__sub_001622F0);
+X86_FUNC(sub_001622F0) {
+    if (links::g_smooth_animation) ::kernel::W32(ctx.esp + 0x0C, 1);
+    __imp__sub_001622F0(ctx, base);
+}
+
+// hitch_log in the settings file, a diagnostic for stalls. Each drawn frame is timed (HitchFrame, from the overlay's
+// draw); a watcher thread samples every guest thread while a frame is overdue (at 30 ms and five more times, further
+// apart): the code addresses on its stack from the top, which are its callers, innermost first. When the late frame
+// arrives the log gets how long it took. A stall in the game's own code shows as the same addresses in each sample; one
+// in the runtime (a texture upload, a file read) shows the game's call into it at the top.
+namespace {
+using HitchClock = std::chrono::steady_clock;
+std::atomic<int64_t> g_hitch_frame_us{0};  // when the last frame was drawn
+std::atomic<int> g_hitch_samples{0};       // taken during the frame in progress
+std::atomic<int> g_hitch_budget{4000};     // sample lines left for this run
+constexpr int kHitchAfterMs[] = {30, 45, 70, 110, 170, 260, 400, 600};
+
+int64_t HitchNowUs() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(HitchClock::now().time_since_epoch()).count();
+}
+
+void HitchSample(int64_t age_ms) {
+    for (auto& t : ::kernel::Threads()) {
+        X86Context* c = t->ctx;
+        if (!c || g_hitch_budget <= 0) continue;
+        uint32_t esp = c->esp, top = t->stack_top;
+        if (!esp || !top || esp >= top || top - esp > 0x100000) continue;
+        char line[256];
+        int n = 0, found = 0;
+        for (uint32_t at = esp; at + 4 <= top && found < 14; at += 4) {
+            uint32_t v = ::kernel::R32(at);
+            if (v < 0x00012000 || v >= 0x003D8000) continue;
+            n += std::snprintf(line + n, sizeof line - size_t(n), " %06X", v);
+            found++;
+        }
+        if (!found) continue;
+        g_hitch_budget--;
+        LOGR("hitch:   +%lld ms thread %X:%s", static_cast<long long>(age_ms), t->id, line);
+    }
+}
+
+void HitchWatch() {
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        int64_t last = g_hitch_frame_us;
+        if (!last || !links::g_hitch_log) continue;
+        int64_t age_ms = (HitchNowUs() - last) / 1000;
+        int taken = g_hitch_samples;
+        if (taken < int(std::size(kHitchAfterMs)) && age_ms >= kHitchAfterMs[taken]) {
+            g_hitch_samples = taken + 1;
+            HitchSample(age_ms);
+        }
+    }
+}
+}  // namespace
+
+namespace links {
+void HitchFrame() {
+    static std::once_flag started;
+    std::call_once(started, [] { std::thread(HitchWatch).detach(); });
+    int64_t now = HitchNowUs(), last = g_hitch_frame_us.exchange(now);
+    int samples = g_hitch_samples.exchange(0);
+    if (last && now - last >= 30000 && g_hitch_budget > 0)
+        LOGR("hitch: a frame took %.1f ms (%d samples above)", double(now - last) / 1000.0, samples);
+}
+}  // namespace links

@@ -40,8 +40,12 @@ The port's settings are in the game's own menus, under **Options > Graphics > PC
 Features still being tried out are under **Options > Graphics > EXPERIMENTAL**.
 
 - **Upscaled UI**: The menus, HUD and fonts upscaled 4x with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN), for sharp text and icons at high resolutions. **BUILD UPSCALED UI** closes the game and upscales the textures from your own copy of the game, on your PC, then starts the game again. Nothing of the game's is shared or downloaded. The first time, it asks to download Real-ESRGAN's official Windows release (45 MB) into `tools\realesrgan` beside the exe, and checks it before using it. The images go into `textures\generated\ui`, and **UPSCALED UI** turns them on and off at any time. Building needs a GPU with Vulkan support.
+- **Smooth Animation**: The game's animations are keyed 30 times a second. Most of them blend from one key to the next, but some play key by key, among them the golfers' celebrations and frustrations after a shot and the crowd's clapping, so at high frame rates they step. This blends those too, so they move smoothly at any frame rate.
 
 ### Graphics
+- **Widescreen**: The course is drawn in the proportions of a 16:9 screen. The Xbox only did that with its HDTV cable, and with any other cable it drew the course a little too wide.
+- **Ultrawide**: On a display wider than 16:9 (21:9, 32:9), the course fills the screen and shows more at the sides, with the HUD at the screen's edges. The menus and movies stay 16:9 in the middle, with black either side, as the menus' art was not made to be seen past 16:9. Set `ultrawide = false` in the settings file for 16:9 with black bars instead.
+- **Shader Cache**: Shaders are compiled once and kept in `shader_cache` beside the exe, so a scene only stutters the first time it is seen, not every time the game starts. The release also comes with `shaders.list`, a list of the shaders a full play session needs (how each is made, not the shaders themselves, so it holds nothing of the game's). On start, the ones your cache lacks are compiled in the background while the game boots, so even the first round's flyover plays smoothly. The list grows as you play and new shaders turn up.
 - **Higher Frame Rates**: Rounds run past the Xbox's 30 FPS, with aiming, the camera and D-pad aiming kept at the original speed.
 - **Widescreen Menu Backgrounds**: The PC GRAPHICS and EXPERIMENTAL screens have the Graphics menu's widescreen bars during a round.
 - **Texture Replacement**: Replaces the game's textures with `.dds` or `.png` images in the `textures\replacement` folder beside the exe.
@@ -52,6 +56,7 @@ Features still being tried out are under **Options > Graphics > EXPERIMENTAL**.
 
 ### Multiplayer
 - **System Link**: LAN play between PCs, as with linked consoles.
+- **Direct Connect**: System Link over the internet. **Multiplayer > DIRECT CONNECT** takes the host's public IP address, and a port if they chose one, picked digit by digit with the D-pad or typed on the keyboard (Ctrl+V pastes one), then goes into System Link, whose search finds the host's game there. The host forwards UDP 1000-1001 and TCP 1002 on their router to their PC, or a port of their choice and the two after it to 1000-1002, then creates a System Link game.
 - **Xbox Live**: The original service is gone. The sign-in menu stays where it is, and B goes back.
 
 ### Input
@@ -74,17 +79,19 @@ Settings are kept in `settings.toml` beside the exe. It is written on the first 
 | `original_frame_rate` | `true` plays as the Xbox did: menus at 60 FPS, rounds at 30 |
 | `fps_counter` | `true` or `false` |
 | `vsync` | `true` or `false` |
+| `ultrawide` | `true` fills a display wider than 16:9 (default), `false` keeps 16:9 between black bars |
 | `overscan` | tenths of a percent trimmed from each edge, `0` to `50` (default `10`) |
 | `anti_aliasing` | `"off"`, `"fxaa"` or `"smaa"` |
 | `anisotropic_filtering` | `0` (as the game asks), `2`, `4`, `8` or `16` |
 | `lod_distance` | percent of the game's detail distances: `100`, `150`, `200`, `300` or `400` |
 | `grass_distance` | percent of the game's grass distance: `100`, `150`, `200` or `300` |
 | `skip_intro` | `true` starts at PRESS START |
+| `smooth_animation` | `true` or `false`: EXPERIMENTAL > SMOOTH ANIMATION |
 | `custom_textures` | `true` or `false`: images in `textures\replacement` |
 | `generated_textures` | `true` or `false`: images in `textures\generated`, such as the upscaled UI |
 | `dump_textures` | `true` or `false` |
 | `texture_dump_format` | `0` PNG, `1` DDS |
-| `join_ip` | a system link host past your LAN that the session search should also ask |
+| `join_ip` | the Direct Connect host, `"ip"` or `"ip:port"` (a host name also works here), that the System Link search also asks |
 
 ## System Requirements
 ### Minimum
@@ -119,13 +126,13 @@ Install [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) and 
 - When it finishes, run `out\build\release\Links2004.exe`.
 
 ### Making a Release
-Run `release.bat`, which needs [7-Zip](https://www.7-zip.org). It writes `Links2004-XBERecomp.zip`, containing the executable, the bundled compiler and an empty `assets` folder. It contains no game files and no game code.
+Run `release.bat`, which needs [7-Zip](https://www.7-zip.org). It writes `Links2004-XBERecomp.zip`, containing the executable, the bundled compiler, an empty `assets` folder and, if you have played with this build, the `shaders.list` from beside the exe. It contains no game files and no game code. To give a release the most complete `shaders.list`, play through the menus and a few holes on a few courses before running it.
 
 ## Repository Layout
 - `src/game`: the hooks that replace or patch the game's functions, among them the PC GRAPHICS and EXPERIMENTAL menus (`pc_graphics.cpp`).
-- `src/common`: the game's description for the runtime, the custom soundtrack support and the UI upscaler (`ui_upscale.cpp`, with `zip_read.cpp` for the game's packs).
+- `src/common`: the game's description for the runtime, the custom soundtrack support, the UI upscaler (`ui_upscale.cpp`, with `zip_read.cpp` for the game's packs) and the Direct Connect window (`direct_connect.cpp`).
 - `config/game.toml`: the recompiler's config, with function and data addresses in the game's executable.
-- `sdk`: the Xbox XBE Recomp recompiler and runtime, with the changes this port needed.
+- `sdk`: the Xbox XBE Recomp recompiler and runtime, with the changes this port needed, among them the shader cache and precompile list (`sdk/runtime/gpu/shader_warm.cpp`).
 
 ## Credits
 - [TGP482](https://github.com/TGP482) for [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp), the recompiler and runtime this port is built on.

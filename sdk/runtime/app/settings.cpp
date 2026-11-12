@@ -103,6 +103,7 @@ void Load() {
     std::string aa = t["anti_aliasing"].value_or(std::string(kAntiAliasing[s.anti_aliasing % 3]));
     for (uint32_t i = 0; i < 3; i++)
         if (aa == kAntiAliasing[i]) s.anti_aliasing = i;
+    s.ultrawide = t["ultrawide"].value_or(s.ultrawide);
     s.custom_textures = t["custom_textures"].value_or(s.custom_textures);
     s.generated_textures = t["generated_textures"].value_or(s.generated_textures);
     s.dump_textures = t["dump_textures"].value_or(s.dump_textures);
@@ -134,6 +135,7 @@ toml::table Table() {
                   {"vsync", s.vsync},
                   {"anisotropic_filtering", int64_t(s.aniso)},
                   {"anti_aliasing", kAntiAliasing[s.anti_aliasing % 3]},
+                  {"ultrawide", s.ultrawide},
                   {"custom_textures", s.custom_textures},
                   {"generated_textures", s.generated_textures},
                   {"dump_textures", s.dump_textures},
@@ -213,6 +215,14 @@ Mode CachedOutput() {
         mode = Output();
     }
     return mode;
+}
+
+float DisplayAspect() {
+    constexpr float kWide = 16.0f / 9.0f;
+    if (!Widescreen()) return 4.0f / 3.0f;
+    Mode m = CachedOutput();
+    float out = m.height ? float(m.width) / float(m.height) : kWide;
+    return Get().ultrawide && out > kWide + 0.01f ? out : kWide;
 }
 
 float RenderScale(uint32_t guest_height) {

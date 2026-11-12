@@ -388,7 +388,7 @@ std::string TexUv(const TexInfo& t, int i, const std::string& uv) {
     if (t.rect) n += F(" / texsize[%d].xy", i);
     n += F(" + texsize[%d].zw", i);
     if (!(t.flags & kTexTarget)) return n;
-    std::string step = "ddx(" + n + ") + ddy(" + n + ")";
+    std::string step = "ddx(" + n + ") + ddy(" + n + ") * stipscale.w";
     return n + F(" + rtshift[%d] * (", i) + step + ")";
 }
 
@@ -486,7 +486,7 @@ const char* kPsTail = R"(float4 spreadtap(Texture2D t, SamplerState s, float2 uv
 }
 // by hand (Links 2004): screen door transparency, the pattern repeating every 32 console pixels, bit 0 the left one
 void stipple(float2 p) {
-    uint2 q = uint2(floor(p / max(stipscale.x, 1))) & 31;
+    uint2 q = uint2(floor(p / max(stipscale.xy, 1))) & 31;
     uint row = stip[q.y >> 2][q.y & 3];
     if (((row >> q.x) & 1) == 0) discard;
 }

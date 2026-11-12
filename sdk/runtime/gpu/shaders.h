@@ -107,7 +107,8 @@ struct DrawConstants {
     float lt[8][7][4];   // per light: diffuse, specular, ambient, position range, direction falloff, attenuation, cos theta/2 phi/2
     float rtshift[4];    // per kTexTarget stage: host pixels its reads move along x and y, negative up and left
     float zparams[4];    // ReversedDepthHlsl: a w buffer's scale (0 for a z buffer), its far w, the polygon offset
-    float stip_scale[4];     // by hand (Links 2004): host pixels per console pixel, for the stipple
+    float stip_scale[4];     // by hand (Links 2004): host pixels per console pixel across and down, for the stipple;
+                             // w: down over across, for rtshift
     uint32_t stipple[32];    // the stipple's rows
 };
 

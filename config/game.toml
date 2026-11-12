@@ -423,3 +423,8 @@ on_true = 0x00036C4E
 at = 0x00036CA7
 call = "SkipBootMovies"
 on_true = 0x00036DB0
+
+# ULTRAWIDE: the menus' camera about to set its projection, its aspect widened for an ultrawide display
+[[hook]]
+at = 0x00065000
+call = "UltrawideMenuAspect"

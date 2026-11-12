@@ -2,22 +2,36 @@
 /out/
 /build/
 *.zip
+*.7z
 *.pdb
 *.exe
+*.dll
 *.obj
 *.o
+*.lib
 
 # recompiled code, derived from the game
 /generated/
 
-# user's own game files
-/assets/
+# user's own game files: only the empty folder is in the repository
+/assets/*
+!/assets/.gitkeep
+*.xbe
+*.iso
+*.xiso
 
-# runtime files
+# runtime files, written beside the exe (normally under /out/ already)
 settings.toml
 /logs/
 /hdd/
 /CrashDumps/
+/capture/
+/soundtracks/
+/textures/
+/shader_cache/
+/shadercache/
+shaders.list
+links2004.log
 
 # editors
 .vs/

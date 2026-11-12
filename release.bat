@@ -29,5 +29,8 @@ for %%f in (msvcp140 vcruntime140) do copy /y "%VCRUNTIME%\%%f.dll" "%OUT%\compi
 rem the compiler folder without its work folder: no game code goes in the zip, the first start builds it
 7z a "%ZIP%" ".\%OUT%\%GAME_EXE%.exe" ".\%OUT%\release\assets" ".\%OUT%\compiler" .\README.md "%SDK%\THIRD_PARTY.txt" .\LICENSE "%D3DCOMPILER%" "%VCRUNTIME%\msvcp140.dll" "%VCRUNTIME%\vcruntime140.dll" "%VCRUNTIME%\vcruntime140_1.dll" -xr!work
 if errorlevel 1 exit /b 1
+rem the list of shaders play has needed so far (recipes, none of the game's code): a new install compiles them in the
+rem background on its first start instead of stalling as each is first drawn
+if exist "%OUT%\shaders.list" 7z a "%ZIP%" ".\%OUT%\shaders.list" >nul
 echo.
 echo   %ZIP% is ready: no game files or game code are in it, attach it to a GitHub release.

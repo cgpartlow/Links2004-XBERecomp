@@ -30,6 +30,7 @@ struct Settings {
     bool vsync = true;
     uint32_t aniso = 0;              // 0 as the game asks
     uint32_t anti_aliasing = 0;      // over the finished frame: 0 off, 1 FXAA, 2 SMAA (gpu/aa.h)
+    bool ultrawide = true;           // an output wider than 16:9 is filled (DisplayAspect), else 16:9 between bars
     bool custom_textures = true;     // images in textures\replacement\ beside the exe replace the game's
     bool generated_textures = true;  // and those in textures\generated\, packs the game's own tools made on this PC
     bool dump_textures = false;      // each texture once into textures\dumps\ beside the exe
@@ -61,6 +62,9 @@ Mode Output();
 float RenderScale(uint32_t guest_height);
 // the output is 3:2 or wider: the console reports a widescreen TV and the frame is shown 16:9, else 4:3 as on a 4:3 TV
 bool Widescreen();
+// the shape the frame is shown in: 4:3 without Widescreen, else 16:9, or the output's own when it is wider than 16:9
+// and Settings::ultrawide is on. A title widens its 3D cameras to it and keeps its menus and HUD 16:9 in the middle.
+float DisplayAspect();
 
 std::filesystem::path ExeDir();
 // the game in assets (game_files.cpp): its folder and this executable's xbe, from the extracted files or a disc

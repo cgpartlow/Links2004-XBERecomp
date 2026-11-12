@@ -8,6 +8,10 @@
 // that have reached it. With one peer (co-op) a LAN address in an XNADDR, which only means something on its
 // owner's LAN, stands for the peer's public one: the join address on the client, the address its packets come
 // from on the host. Ports a NAT rewrote are answered on the port the peer's packets came from.
+// Join port (join_ip = "host:port"): the host's router forwards that port and the ones after it to the game's own
+// ports, from the lowest port the title binds (its base). Datagrams and connections to the join address go to the
+// same place in the forwarded range, and what comes back from there is handed to the title as from the game's own
+// ports, so it never sees the difference.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -95,6 +99,8 @@ std::mutex g_nat_lock;
 std::unordered_map<uint64_t, uint16_t> g_nat;  // (peer address, our port) -> the port its packets come from
 std::vector<uint32_t> g_public;                // public addresses packets came from, the latest last
 constexpr size_t kMaxPublic = 8;
+std::atomic<uint16_t> g_base_port{0};  // the lowest port the title bound, host order: its first game port
+constexpr int kJoinSpan = 16;          // the game ports, from the base, a join port stands for
 
 std::string Ip(uint32_t a) {
     char s[32];
@@ -111,11 +117,16 @@ bool Private(uint32_t a) {
 
 uint64_t NatKey(uint32_t address, uint16_t port) { return uint64_t(address) << 16 | port; }
 
-// the F10 join address, resolved when it changes; 0 for none
-uint32_t JoinAddress() {
+// the join address (join_ip, "host" or "host:port"), resolved when it changes; address 0 for none, port 0 for the
+// game's own
+struct JoinTarget {
+    uint32_t address = 0;  // network order
+    uint16_t port = 0;     // host order
+};
+JoinTarget Join() {
     static std::mutex m;
     static std::string last;
-    static uint32_t address = 0;
+    static JoinTarget target;
     std::string text;
     {
         std::lock_guard<std::recursive_mutex> ui(app::UiLock());
@@ -124,18 +135,46 @@ uint32_t JoinAddress() {
     text.erase(0, text.find_first_not_of(" \t"));
     text.erase(text.find_last_not_of(" \t") + 1);
     std::lock_guard<std::mutex> lock(m);
-    if (text == last) return address;
+    if (text == last) return target;
     last = text;
-    address = 0;
+    target = {};
+    std::string host = text;
+    if (size_t colon = text.rfind(':'); colon != std::string::npos) {
+        host = text.substr(0, colon);
+        int port = std::atoi(text.c_str() + colon + 1);
+        if (port > 0 && port < 65536) target.port = uint16_t(port);
+    }
     addrinfo hints{};
     hints.ai_family = AF_INET;
     addrinfo* res = nullptr;
-    if (!text.empty() && getaddrinfo(text.c_str(), nullptr, &hints, &res) == 0) {
-        address = reinterpret_cast<sockaddr_in*>(res->ai_addr)->sin_addr.s_addr;
+    if (!host.empty() && getaddrinfo(host.c_str(), nullptr, &hints, &res) == 0) {
+        target.address = reinterpret_cast<sockaddr_in*>(res->ai_addr)->sin_addr.s_addr;
         freeaddrinfo(res);
     }
-    if (!text.empty()) LOGI("xnet: join %s -> %s", text.c_str(), address ? Ip(address).c_str() : "not found");
-    return address;
+    if (!text.empty())
+        LOGI("xnet: join %s -> %s%s", text.c_str(), target.address ? Ip(target.address).c_str() : "not found",
+             target.port ? (", port " + std::to_string(target.port) + " for the game's first port").c_str() : "");
+    return target;
+}
+uint32_t JoinAddress() { return Join().address; }
+
+// how far the join port moves the game's ports, 0 without one or before the title bound any
+int JoinOffset() {
+    JoinTarget j = Join();
+    uint16_t base = g_base_port;
+    return j.address && j.port && base ? int(j.port) - int(base) : 0;
+}
+// a destination at the join address: a game port to the forwarded port that stands for it
+void ToJoinPort(sockaddr_in& d) {
+    int offset = JoinOffset(), port = ntohs(d.sin_port), base = g_base_port;
+    if (!offset || d.sin_addr.s_addr != JoinAddress() || port < base || port >= base + kJoinSpan) return;
+    d.sin_port = htons(uint16_t(port + offset));
+}
+// a source at the join address: a forwarded port back to the game port it stands for
+void FromJoinPort(sockaddr_in& s) {
+    int offset = JoinOffset(), port = ntohs(s.sin_port), base = g_base_port + offset;
+    if (!offset || s.sin_addr.s_addr != JoinAddress() || port < base || port >= base + kJoinSpan) return;
+    s.sin_port = htons(uint16_t(port - offset));
 }
 
 uint32_t PrimaryAddress() {
@@ -226,6 +265,7 @@ int Recv(uint32_t sock, SOCKET s, const std::vector<Span>& spans, uint32_t from,
         done += c;
     }
     if (done < n) LOG_FIRST(10, "xnet: %d byte datagram cut to %d", n, done);
+    FromJoinPort(src);
     uint32_t peer = src.sin_addr.s_addr;
     if (peer != g_local && !Private(peer)) {
         if (g_remote.exchange(peer) != peer) LOGI("xnet: peer %s", Addr(src).c_str());
@@ -249,6 +289,7 @@ int SendOnce(SOCKET s, const uint8_t* data, int len, const sockaddr_in* to) {
         if (uint32_t join = JoinAddress()) {
             also.push_back(d);
             also.back().sin_addr.s_addr = join;
+            ToJoinPort(also.back());
         }
         {
             std::lock_guard<std::mutex> lock(g_nat_lock);
@@ -261,9 +302,12 @@ int SendOnce(SOCKET s, const uint8_t* data, int len, const sockaddr_in* to) {
         for (const sockaddr_in& a : also)
             ::sendto(s, reinterpret_cast<const char*>(data), len, 0, reinterpret_cast<const sockaddr*>(&a), sizeof(a));
     } else {
-        std::lock_guard<std::mutex> lock(g_nat_lock);
-        auto it = g_nat.find(NatKey(d.sin_addr.s_addr, d.sin_port));
-        if (it != g_nat.end()) d.sin_port = it->second;
+        {
+            std::lock_guard<std::mutex> lock(g_nat_lock);
+            auto it = g_nat.find(NatKey(d.sin_addr.s_addr, d.sin_port));
+            if (it != g_nat.end()) d.sin_port = it->second;
+        }
+        ToJoinPort(d);
     }
     if (g_instance && d.sin_addr.s_addr == INADDR_BROADCAST) {
         for (int i = 1; i <= kLoopbackInstances; i++) {
@@ -579,6 +623,12 @@ HLE_STDCALL(bind, 3) {
     sockaddr_in me{};
     int len = sizeof(me);
     ::getsockname(k.s, reinterpret_cast<sockaddr*>(&me), &len);
+    // the game's first port: the lowest one the title asked for by number
+    if (uint16_t asked = ntohs(at.sin_port)) {
+        uint16_t base = g_base_port;
+        while ((!base || asked < base) && !g_base_port.compare_exchange_weak(base, asked)) {
+        }
+    }
     std::lock_guard<std::mutex> lock(g_lock);
     if (auto it = g_sockets.find(a[0]); it != g_sockets.end()) it->second.port = me.sin_port;
     return 0;
@@ -587,6 +637,8 @@ HLE_STDCALL(connect, 3) {
     Socket k = Find(a[0]);
     if (k.s == INVALID_SOCKET) return Fail(WSAENOTSOCK);
     sockaddr_in to = GuestAddr(a[1]);
+    ToJoinPort(to);
+    if (to.sin_addr.s_addr == JoinAddress()) LOGI("xnet: connect %X to the join host at %s", a[0], Addr(to).c_str());
     if (::connect(k.s, reinterpret_cast<sockaddr*>(&to), sizeof(to)) == 0) return 0;
     int e = HostError();
     if (e != WSAEWOULDBLOCK || k.nonblocking) return Fail(e);

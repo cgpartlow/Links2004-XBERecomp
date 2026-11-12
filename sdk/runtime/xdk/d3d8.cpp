@@ -18,6 +18,7 @@
 
 #include "app/app.h"
 #include "core/diag.h"
+#include "gpu/shader_warm.h"
 #include "gpu/backend.h"
 #include "gpu/shaders.h"
 #include "gpu/simple_dirty.h"
@@ -647,6 +648,12 @@ HLE_STDCALL(D3DDevice_UpdateOverlay, 5) {
     if (fmt == 0x24 || fmt == 0x25) sp = std::max(sp, sw * 2);
     OverlayRect s = ReadRect(a[1], sw, sh), d = ReadRect(a[2], dw, dh);
     if (s.r <= s.l || s.b <= s.t || d.r <= d.l || d.b <= d.t) return 0;
+    // an ultrawide frame (app::DisplayAspect) shows the movie 16:9 in its middle, black either side
+    if (float wide = app::DisplayAspect(); wide > 16.0f / 9.0f + 0.01f) {
+        float k = (16.0f / 9.0f) / wide, c = float(dw) / 2;
+        d.l = int32_t(std::lround(c + (d.l - c) * k));
+        d.r = std::max(d.l + 1, int32_t(std::lround(c + (d.r - c) * k)));
+    }
     const uint8_t* in = static_cast<const uint8_t*>(HostPtr(mem::VirtualFromPhysical(src.data)));
     uint8_t* out = static_cast<uint8_t*>(HostPtr(mem::VirtualFromPhysical(dst.data)));
     for (int32_t y = 0; y < int32_t(dh); y++) {
@@ -1046,6 +1053,7 @@ HLE_STDCALL(D3DDevice_CreateVertexShader, 4) {
         for (uint32_t i = 0; i < n * 4; i++) vs->program.push_back(R32(func + 4 + i * 4));
     }
     gpu::ParseDeclaration(*vs);
+    gpu::warm::NoteProgram(vs->program);  // its listed shaders compile in the background from here
     uint32_t rec = mem::AllocSystem(16, 16);
     W32(rec, 1);  // by hand (Links 2004): the reference count D3DDevice_DeleteVertexShader drops, as in the XDK
     vs->handle = rec | 1;
@@ -1232,7 +1240,10 @@ std::shared_ptr<gpu::VertexShader> SelectedShader(uint32_t handle, uint32_t slot
     key = gpu::Hash(vs.inputs.data(), sizeof(vs.inputs), key);
     key = gpu::Hash(vs.stream_stride.data(), sizeof(vs.stream_stride), key);
     auto& kept = g_selected[key];
-    if (!kept) kept = std::make_shared<gpu::VertexShader>(std::move(vs));
+    if (!kept) {
+        gpu::warm::NoteProgram(vs.program);  // as the program stands in its slot, which is what a draw hashes
+        kept = std::make_shared<gpu::VertexShader>(std::move(vs));
+    }
     return kept;
 }
 }  // namespace
