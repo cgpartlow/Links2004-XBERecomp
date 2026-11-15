@@ -80,7 +80,12 @@ void Init() {
     }
 }
 
-Pad Poll(int port) {
+namespace {
+thread_local bool t_peek = false;
+}
+bool Peeking() { return t_peek; }
+
+Pad Poll(int port, bool peek) {
     Pad p;
     {
         std::lock_guard lock(g_lock);
@@ -109,7 +114,11 @@ Pad Poll(int port) {
             p.ry = int16_t(-1 - axis(SDL_GAMEPAD_AXIS_RIGHTY));
         }
     }
-    if (app::kGame.pad) app::kGame.pad(port, p);
+    if (app::kGame.pad) {
+        t_peek = peek;
+        app::kGame.pad(port, p);
+        t_peek = false;
+    }
     return p;
 }
 

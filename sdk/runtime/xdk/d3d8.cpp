@@ -1399,10 +1399,31 @@ HLE_STDCALL(D3DDevice_SetPixelShaderConstant, 3) {
 
 // drawing
 
+// GameInfo::draw: the draw's stream 0 vertices and where a vertex has its position
+static void ProbeDraw(uint32_t prim, uint32_t count, const void* vertices, uint32_t stride,
+                      const uint16_t* indices = nullptr) {
+    if (!app::kGame.draw || !vertices || !stride || !count) return;
+    uint32_t position = 0;
+    bool program = (g_state.vs_handle & 1) != 0;
+    if (program) {
+        if (!g_state.vs || g_state.vs->inputs[0].stream != 0) return;
+        position = g_state.vs->inputs[0].offset;
+    }
+    app::DrawProbe p{prim, count, static_cast<const uint8_t*>(vertices), indices, stride, position,
+                     reinterpret_cast<const float (*)[4]>(g_state.vsc.data()), g_presents.load(),
+                     g_state.zs.data != 0, program};
+    app::kGame.draw(p);
+}
+
 HLE_STDCALL(D3DDevice_DrawVertices, 3) {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     Walk(Dev(kDevPush));  // a visibility test begun since the last draw counts this one
     SyncDeferred();
+    if (app::kGame.draw && g_state.streams[0].vb) {
+        const auto& st = g_state.streams[0];
+        uint32_t data = mem::VirtualFromPhysical(R32(st.vb + 4));
+        if (data && st.stride) ProbeDraw(a[0], a[2], static_cast<const uint8_t*>(HostPtr(data)) + size_t(a[1]) * st.stride, st.stride);
+    }
     if (g_backend) g_backend->Draw(g_state, a[0], a[1], a[2], nullptr);
     return 0;
 }
@@ -1412,6 +1433,13 @@ HLE_STDCALL(D3DDevice_DrawIndexedVertices, 3) {
     Walk(Dev(kDevPush));
     SyncDeferred();
     const uint8_t* indices = a[2] ? static_cast<const uint8_t*>(HostPtr(a[2])) : nullptr;
+    if (app::kGame.draw && indices && g_state.streams[0].vb) {
+        const auto& st = g_state.streams[0];
+        uint32_t data = mem::VirtualFromPhysical(R32(st.vb + 4));
+        if (data && st.stride)
+            ProbeDraw(a[0], a[1], static_cast<const uint8_t*>(HostPtr(data)) + size_t(g_state.base_vertex) * st.stride,
+                      st.stride, reinterpret_cast<const uint16_t*>(indices));
+    }
     if (g_backend) g_backend->Draw(g_state, a[0], 0, a[1], indices);
     return 0;
 }
@@ -1447,6 +1475,7 @@ uint32_t UpVertices(const void* src, uint32_t bytes) {
 void DrawUp(uint32_t prim, uint32_t count, const void* vertices, uint32_t stride, const uint16_t* indices = nullptr) {
     if (!g_backend || !count || !stride) return;
     SyncDeferred();
+    ProbeDraw(prim, count, vertices, stride, indices);
     // indexed: count is of indices, the ring takes the vertices up to the highest one
     uint32_t used = indices ? *std::max_element(indices, indices + count) + 1u : count;
     auto stream = g_state.streams[0];

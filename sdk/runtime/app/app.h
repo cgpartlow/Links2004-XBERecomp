@@ -74,6 +74,9 @@ struct GameFiles {
     std::vector<uint8_t> xbe;
 };
 bool FindGame(GameFiles& game);
+// where FindGame found the game's files (the assets folder), empty before it has; with a disc image the files are
+// in the image (kernel::MountedDisc)
+std::filesystem::path GameDir();
 std::string Sha1(const std::vector<uint8_t>& data);  // lower case hex
 // the recompiled code, <exe>.dll, built from the game in assets when missing or out of date (game_code.cpp) and
 // loaded; false after telling the player why the game cannot start, or when they chose not to start it yet
@@ -99,6 +102,17 @@ struct Option {  // a setting in the settings file, flag or value
     bool* flag;
     uint32_t* value;
 };
+// a draw as the title made it, for a title that reads its own picture (where its menus put their text, say)
+struct DrawProbe {
+    uint32_t prim, count;         // the console's primitive type, and vertices
+    const uint8_t* vertices;      // stream 0's: the first one drawn, or the one index 0 is
+    const uint16_t* indices;      // null when the draw is not indexed, and count is then of vertices
+    uint32_t stride, position;    // bytes per vertex, and where its position's three floats are
+    const float (*constants)[4];  // the vertex shader constants in hardware order: D3D register r is [r + 96]
+    uint32_t frame;               // counts the title's presents
+    bool depth;                   // a depth buffer is bound: a 3D scene's draw, not a flat menu's
+    bool program;                 // drawn by a vertex program, so constants are its; else fixed function
+};
 struct GameInfo {
     const wchar_t* title;        // window and splash
     const wchar_t* short_title;  // message boxes
@@ -120,6 +134,8 @@ struct GameInfo {
     void (*ui)(double fps);        // each frame inside the ImGui frame, UiLock held
     void (*pad)(int port, input::Pad& pad);  // a polled pad before the game gets it
     void (*rumble)(int port, uint16_t& left, uint16_t& right);
+    // the title's thread, each draw (but one indexed from the bound index buffer), before the renderer gets it
+    void (*draw)(const DrawProbe& draw);
 };
 extern const GameInfo kGame;
 

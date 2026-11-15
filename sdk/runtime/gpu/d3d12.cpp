@@ -1450,16 +1450,25 @@ ID3DBlob* D3D12Backend::Compile(const std::string& src, const char* entry, const
         blobs_[hash] = code;
         return code.Get();
     }
+    // a background compile of this very shader is under way: wait for it rather than compile it a second time
+    while (!warm::Claim(hash)) {
+        if (warm::LoadCached(hash, check, src.size(), code)) {
+            blobs_[hash] = code;
+            return code.Get();
+        }
+    }
     g_perf.shaders++;
     HRESULT hr = D3DCompile(src.data(), src.size(), nullptr, nullptr, nullptr, entry, profile,
-                            D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, &code, &err);
+                            warm::kCompileFlags, 0, &code, &err);
     if (FAILED(hr)) {
+        warm::Release(hash);
         LOGE("d3d12: %s compile failed: %s", profile, err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
         LOGE("%s", src.c_str());
         blobs_[hash] = nullptr;
         return nullptr;
     }
     warm::StoreCached(hash, check, src.size(), code.Get());
+    warm::Release(hash);
     blobs_[hash] = code;
     return code.Get();
 }

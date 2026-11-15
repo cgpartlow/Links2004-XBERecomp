@@ -48,15 +48,24 @@ BOOL CALLBACK AddMonitor(HMONITOR m, HDC, LPRECT, LPARAM list) {
 
 }  // namespace
 
+// The monitors, left to right. Asked for every frame (the quick menu's MONITOR row, GameMonitor), so a list is kept for
+// a second rather than asking Windows each time: a monitor plugged in or out shows within a second.
 std::vector<Monitor> Monitors() {
+    static std::mutex lock;
+    static std::vector<Monitor> kept;
+    static ULONGLONG kept_at = 0;
+    std::lock_guard<std::mutex> guard(lock);
+    ULONGLONG now = GetTickCount64();
+    if (kept_at && now - kept_at < 1000) return kept;
     std::vector<std::pair<RECT, Monitor>> found;
     EnumDisplayMonitors(nullptr, nullptr, AddMonitor, reinterpret_cast<LPARAM>(&found));
     std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) {
         return a.first.left != b.first.left ? a.first.left < b.first.left : a.first.top < b.first.top;
     });
-    std::vector<Monitor> out;
-    for (auto& f : found) out.push_back(std::move(f.second));
-    return out;
+    kept.clear();
+    for (auto& f : found) kept.push_back(std::move(f.second));
+    kept_at = now;
+    return kept;
 }
 
 std::mutex& MonitorLock() {
@@ -152,6 +161,9 @@ toml::table Table() {
 }  // namespace
 
 void Save() {
+    // the in-game menus save on the game's thread and the quick menu on the renderer's: one writer at a time
+    static std::mutex m;
+    std::lock_guard<std::mutex> lock(m);
     std::ofstream f(File());
     f << Table() << "\n";
 }

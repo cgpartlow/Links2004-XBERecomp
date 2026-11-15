@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <random>
 
 #include "app/app.h"
@@ -123,10 +124,18 @@ struct JoinTarget {
     uint32_t address = 0;  // network order
     uint16_t port = 0;     // host order
 };
+// Asked several times a packet (JoinOffset, JoinAddress), so the setting is read at most every half second: its
+// string is only read under the UI's lock, which the renderer holds for each whole UI frame.
 JoinTarget Join() {
     static std::mutex m;
     static std::string last;
     static JoinTarget target;
+    static std::chrono::steady_clock::time_point next_read;
+    auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(m);
+        if (now < next_read) return target;
+    }
     std::string text;
     {
         std::lock_guard<std::recursive_mutex> ui(app::UiLock());
@@ -135,6 +144,7 @@ JoinTarget Join() {
     text.erase(0, text.find_first_not_of(" \t"));
     text.erase(text.find_last_not_of(" \t") + 1);
     std::lock_guard<std::mutex> lock(m);
+    next_read = now + std::chrono::milliseconds(500);
     if (text == last) return target;
     last = text;
     target = {};

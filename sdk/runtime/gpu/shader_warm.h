@@ -25,9 +25,19 @@ std::string SpriteSizeHlsl(std::string s);
 namespace warm {
 
 // a shader's cache name from its source, entry point and profile; check is a second hash of the source
+// the compiler's flags for every shader, the renderer's and the background compiles' alike: the cache's entries are
+// only right for these (a change of them needs a new kCacheMagic in shader_warm.cpp)
+constexpr unsigned kCompileFlags = 0;  // D3DCOMPILE_OPTIMIZATION_LEVEL1, which d3dcompiler.h defines as 0
 uint64_t ShaderHash(const std::string& src, const char* entry, const char* profile, uint64_t& check);
 bool LoadCached(uint64_t hash, uint64_t check, size_t source_size, Microsoft::WRL::ComPtr<ID3DBlob>& code);
 void StoreCached(uint64_t hash, uint64_t check, size_t source_size, ID3DBlob* code);
+
+// One compile of a shader at a time: the renderer and the background compiles each claim a shader before compiling it
+// and release it once it is in the cache (or failed). Claim waits while another has it and then says false: look in
+// the cache again. TryClaim does not wait.
+bool Claim(uint64_t hash);
+bool TryClaim(uint64_t hash);
+void Release(uint64_t hash);
 
 // reads shaders.list and starts compiling what the cache lacks; once, when the renderer starts
 void Start();

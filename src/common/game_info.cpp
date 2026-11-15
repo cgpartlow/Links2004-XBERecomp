@@ -2,6 +2,10 @@
 
 #include "app/app.h"
 #include "common/direct_connect.h"
+#include "common/menu_mouse.h"
+#include "common/pc_controls.h"
+#include "common/quick_menu.h"
+#include "common/ui_font.h"
 #include "common/ui_upscale.h"
 
 namespace links {
@@ -11,14 +15,19 @@ extern bool g_original_fps;         // pc_graphics.cpp: PC GRAPHICS > FRAME RATE
 extern uint32_t g_lod_percent;      // pc_graphics.cpp: PC GRAPHICS > LOD DISTANCE, percent of the game's
 extern uint32_t g_grass_percent;    // pc_graphics.cpp: PC GRAPHICS > GRASS DISTANCE, percent of the game's
 extern bool g_skip_intro;           // pc_graphics.cpp: PC GRAPHICS > SKIP INTRO
-extern bool g_animation_log;        // pc_graphics.cpp: a diagnostic, animation timing into the log
-extern bool g_smooth_animation;     // pc_graphics.cpp: EXPERIMENTAL > SMOOTH ANIMATION
-extern bool g_hitch_log;            // pc_graphics.cpp: a diagnostic, long frames into the log
+extern bool g_smooth_animation;     // pc_graphics.cpp: PC GRAPHICS > SMOOTH ANIMATION
+extern uint32_t g_fov_percent;      // pc_graphics.cpp: PC GRAPHICS > FIELD OF VIEW, percent of the game's
 void DrawPcOverlay(double fps);     // pc_graphics.cpp: the FPS counter
 
-// the game window is up: DIRECT CONNECT's font before the renderer builds the font atlas, then the soundtracks
+// each frame inside ImGui's: the port's overlay, then the quick menu over it
+void Ui(double fps) {
+    DrawPcOverlay(fps);
+    DrawQuickMenu();
+}
+
+// the game window is up: the port's windows' font before the renderer builds the font atlas, then the soundtracks
 void Window(void* hwnd) {
-    LoadDirectConnectFont();
+    LoadUiFont();
     StartSoundtracks(hwnd);
 }
 
@@ -26,8 +35,6 @@ void Window(void* hwnd) {
 // again when it is done and never returns
 void Init() {
     if (UpscaleUiAsked()) RunUiUpscale();
-    // hitch_log also turns on the renderer's timing log (XBE_PERF, read once when the renderer first asks)
-    if (g_hitch_log) _putenv("XBE_PERF=1");
 }
 }
 
@@ -46,16 +53,16 @@ const app::GameInfo app::kGame = {
                 {"lod_distance", nullptr, &links::g_lod_percent},
                 {"grass_distance", nullptr, &links::g_grass_percent},
                 {"skip_intro", &links::g_skip_intro, nullptr},
-                {"animation_log", &links::g_animation_log, nullptr},
                 {"smooth_animation", &links::g_smooth_animation, nullptr},
-                {"hitch_log", &links::g_hitch_log, nullptr}},
-    .load = nullptr,                      // reads more from the settings file's toml::table
-    .save = nullptr,                      // writes more into it
+                {"field_of_view", nullptr, &links::g_fov_percent}},
+    .load = links::LoadControls,          // reads more from the settings file's toml::table: the keys
+    .save = links::SaveControls,          // writes more into it
     .init = links::Init,                  // after the settings load, before the window and boot
     .loaded = nullptr,                    // image in memory, before its entry point runs
     .window = links::Window,              // the game window is up
-    .message = nullptr,                   // window messages first; true takes one
-    .ui = links::DrawPcOverlay,           // ImGui drawing each frame
-    .pad = links::DirectConnectPad,       // changes a polled pad
+    .message = links::MenuMessage,        // window messages first; true takes one: the wheel, for the menus
+    .ui = links::Ui,                      // ImGui drawing each frame
+    .pad = links::PcPad,                  // changes a polled pad: keyboard and mouse, the quick menu, DIRECT CONNECT
     .rumble = nullptr,                    // changes a rumble before it is set
+    .draw = links::MenuDraw,              // each draw: where the menus' text is, for the mouse
 };

@@ -37,7 +37,7 @@
 //   by 0x265C50, each mesh by 0x2656F0): the faint tint over the middle, the top bar and the bottom bar, in the bars'
 //   own colour. LuaFileRan puts the nodes at the menu's origin, opaque, all three shown. Outside a round the control
 //   stays hidden, so the screen looks as it did.
-// - SKIP INTRO leaves the boot's legal screens, logo movies and intro out (SkipLegalScreen and the hooks after it).
+// - SKIP INTRO leaves the boot's legal screens, logo movies and intro out (game/course.cpp).
 // - A on PC GRAPHICS pushes it by name (0x7C310 on the menu manager 0x453010), as the Options menu opens its pages.
 // - Left, Right and A change the selected setting; its button text is a string table entry rewritten each time
 //   (PCGfx1 to PCGfx12). The list built its items once, each keeping its text (item +0x0C, from the string table by
@@ -102,11 +102,15 @@
 
 #include "app/app.h"
 #include "common/direct_connect.h"
+#include "common/menu_mouse.h"
+#include "common/pc_controls.h"
+#include "common/quick_menu.h"
 #include "common/ui_upscale.h"
 #include "core/log.h"
 #include "imgui.h"
 #include "kernel/kernel.h"
 #include "xdk/hle.h"
+#include "game/pc_graphics.h"
 
 namespace links {
 bool g_fps_counter = false;    // settings file fps_counter (game_info.cpp lists it), drawn by DrawPcOverlay
@@ -114,9 +118,8 @@ bool g_original_fps = false;   // settings file original_frame_rate: rounds at t
 uint32_t g_lod_percent = 100;  // settings file lod_distance: the objects' detail distances, 100 as the game has them
 uint32_t g_grass_percent = 100;  // settings file grass_distance: how far the 3D grass reaches, 100 as the game has it
 bool g_skip_intro = false;  // settings file skip_intro: boot goes from the loading screen straight to PRESS START
-bool g_animation_log = false;  // settings file animation_log: a diagnostic, each animation's timing into the log (ProbeAnimation)
-bool g_hitch_log = false;  // settings file hitch_log: a diagnostic, long frames and what ran during them (HitchFrame)
-bool g_smooth_animation = false;  // settings file smooth_animation: EXPERIMENTAL > SMOOTH ANIMATION (sub_001622F0)
+bool g_smooth_animation = true;  // settings file smooth_animation: PC GRAPHICS > SMOOTH ANIMATION (sub_001622F0)
+uint32_t g_fov_percent = 100;  // settings file field_of_view: how much more the 3D cameras see, 100 as the game has it
 }
 
 namespace {
@@ -198,9 +201,9 @@ const char kExperimentalScene[] = R"lua(Scenes.XLiveStatusMenu = {
 			Items = {
 				AButton = "OnHitAButton()",
 				Start = "OnHitAButton()",
-				Enabled = { true, true, true },
-				HelpIDs = { "HelpPCExp1", "HelpPCExp2", "HelpPCExp3" },
-				TextIDs = { "PCExp1", "PCExp2", "PCExp3" },
+				Enabled = { true, true },
+				HelpIDs = { "HelpPCExp1", "HelpPCExp2" },
+				TextIDs = { "PCExp1", "PCExp2" },
 			},
 		},
 	},
@@ -411,7 +414,7 @@ end
 }
 std::string GraphicsLayoutPatch() { return SlotPatch(2) + SlotPatch(3); }
 
-// The PC GRAPHICS screen's scene, in place of XLiveFeedbackMenu's: thirteen settings, Left and Right change them
+// The PC GRAPHICS screen's scene, in place of XLiveFeedbackMenu's: fifteen settings, Left and Right change them
 const char kPcScene[] = R"lua(Scenes.XLiveFeedbackMenu = {
 	Controls = {
 		{
@@ -424,10 +427,10 @@ const char kPcScene[] = R"lua(Scenes.XLiveFeedbackMenu = {
 				Back = "OnHitBButton()",
 				Left = "OnHitLeft()",
 				Right = "OnHitRight()",
-				Enabled = { true, true, true, true, true, true, true, true, true, true, true, true, true },
+				Enabled = { true, true, true, true, true, true, true, true, true, true, true, true, true, true, true },
 				HelpIDs = "HelpPCGfx",
 				TextIDs = { "PCGfx1", "PCGfx2", "PCGfx3", "PCGfx4", "PCGfx5", "PCGfx6", "PCGfx7", "PCGfx8", "PCGfx9",
-				            "PCGfx10", "PCGfx11", "PCGfx12", "PCGfx13" },
+				            "PCGfx10", "PCGfx11", "PCGfx12", "PCGfx13", "PCGfx14", "PCGfx15" },
 			},
 		},
 	},
@@ -464,12 +467,17 @@ bool EndsWithNoCase(const std::string& s, const char* suffix) {
     return true;
 }
 
+}  // namespace
+
+// game/pc_graphics.h
 uint32_t GameAlloc(X86Context& ctx, uint32_t size) {
     return ::kernel::CallGuest(ctx, kGameAlloc, {size, 0, kStringTableSource, 0x3A});
 }
 void GameFree(X86Context& ctx, uint32_t block) {
     if (block) ::kernel::CallGuest(ctx, kGameFree, {block, 0, 0, 0});
 }
+
+namespace {
 
 // The sceneData bytecode: string constants are a type byte 4, a 32 bit length counting a closing 0, the bytes and the
 // 0. A dump has no offsets, so one can change length in place. The one constant edit() accepts is replaced.
@@ -756,6 +764,7 @@ const std::vector<uint32_t> kFpsCaps = {30, 60, app::kFpsCapRefresh, 120, 144, 1
 const std::vector<uint32_t> kAniso = {0, 2, 4, 8, 16};
 const std::vector<uint32_t> kOverscan = {0, 5, 10, 15, 20, 25, 30, 40, 50};
 const std::vector<uint32_t> kLodPercents = {100, 150, 200, 300, 400};
+const std::vector<uint32_t> kFovPercents = {100, 110, 120, 130, 140, 150};
 const std::vector<uint32_t> kGrassPercents = {100, 150, 200, 300};  // GrowGrassIndices makes room for the last
 
 // a percentage as a multiple: 150 is "1.5X", 75 "0.75X", 200 "2X"
@@ -891,6 +900,13 @@ const Row kRows[] = {
     {"GRASS DISTANCE",
      [] { return links::g_grass_percent == 100 ? std::string("ORIGINAL") : Times(links::g_grass_percent); },
      [](int dir) { links::g_grass_percent = Step(kGrassPercents, links::g_grass_percent, dir); }},
+    // how much more the 3D cameras see than the game's own (CameraFieldOfView), from the next camera made
+    {"FIELD OF VIEW",
+     [] { return links::g_fov_percent == 100 ? std::string("ORIGINAL") : Times(links::g_fov_percent); },
+     [](int dir) { links::g_fov_percent = Step(kFovPercents, links::g_fov_percent, dir); }},
+    // every animation blended between its 30 per second keyframes, as the swing always was (sub_001622F0)
+    {"SMOOTH ANIMATION", [] { return std::string(links::g_smooth_animation ? "ON" : "OFF"); },
+     [](int) { links::g_smooth_animation = !links::g_smooth_animation; }},
     // the legal screens, logo movies and intro left out from the next start (SkipLegalScreens and the rest)
     {"SKIP INTRO", [] { return std::string(links::g_skip_intro ? "ON" : "OFF"); },
      [](int) { links::g_skip_intro = !links::g_skip_intro; }},
@@ -918,9 +934,6 @@ const Row kExperimentalRows[] = {
          app::Save();
          if (!links::StartUiUpscale()) LOGE("menu: the UI upscaler did not start");
      }},
-    // every animation blended between its 30 per second keyframes, as the swing always was (sub_001622F0)
-    {"SMOOTH ANIMATION", [] { return std::string(links::g_smooth_animation ? "ON" : "OFF"); },
-     [](int) { links::g_smooth_animation = !links::g_smooth_animation; }},
 };
 constexpr uint32_t kExperimentalRowCount = sizeof(kExperimentalRows) / sizeof(kExperimentalRows[0]);
 
@@ -1079,7 +1092,6 @@ void SetPcStrings(Table& t) {
     SetString(t, "PCExpTitle", u"EXPERIMENTAL", "GraphicOptionsMenu_Title");
     SetString(t, "HelpPCExp1", u"\n\x8D\x8E" u"TURN UPSCALED UI ON OR OFF \x14" u"BACK", "HelpGraphicsOptions");
     SetString(t, "HelpPCExp2", u"\n\x13" u"UPSCALE THE UI ON THIS PC \x14" u"BACK", "HelpGraphicsOptions");
-    SetString(t, "HelpPCExp3", u"\n\x8D\x8E" u"BLEND ANIMATION KEYFRAMES \x14" u"BACK", "HelpGraphicsOptions");
     // the build question; each line short enough not to wrap (the box wraps at its own width)
     SetString(t, "PCBuildTitle", u"UPSCALE UI", "MessageWarning");
     SetString(t, "PCBuildBody", u"The game closes to upscale\nits menus, then restarts.", "MessageRestart");
@@ -1088,6 +1100,100 @@ void SetPcStrings(Table& t) {
             std::string id = RowId(*screen, i);
             SetString(t, id, RowText(*screen, i), "LiveFeedbackSession", RowEntrySize(id));
         }
+}
+
+// ---- keyboard prompts ----
+// The menus' font has the controller's buttons as characters (0x13 A, 0x14 B, 0x15 X, 0x16 Y, 0x17 and 0x18 the
+// triggers, 0x19 START, 0x1A BACK, 0x1B white, 0x1C black, 0x8F the D-pad, 0x8B 0x8C the stick's down and up), and the
+// game's text names them that way: "\x13SELECT \x14BACK". While the keyboard and mouse are the last used, each
+// becomes its key's shortest name in brackets, "[ENT]SELECT [BKS]BACK", as the HUD has little room. Every entry with a button is given room for
+// that when the table loads (kPromptRoom characters a button) and is rewritten in place when the last used device or
+// the keys change, as the settings' rows are. The game copies a text when it builds a menu or shows a help line, so a
+// menu on screen changes with its next help line.
+
+constexpr size_t kPromptRoom = 5;  // a key's name is longer than its button by at most "[WASD]"
+std::mutex g_prompt_lock;  // g_prompt_text and the table's prompts: the table's load and RefreshPrompts, on any thread
+std::map<std::string, std::u16string> g_prompt_text;  // each such entry's text as the game has it
+std::atomic<bool> g_prompts_ready{false};             // the table is loaded and g_prompt_text made: RefreshPrompts may run
+bool IsButton(char16_t c) { return (c >= 0x13 && c <= 0x1C) || c == 0x8B || c == 0x8C || c == 0x8F; }
+
+// a text with its buttons as the keys bound to them, each as short as it can be: "[ENT]SELECT [BKS]BACK"
+std::u16string KeyboardText(const std::u16string& text) {
+    static const char* const kButtonAction[] = {"a", "b", "x", "y", "left_trigger", "right_trigger", "start", "back",
+                                                "white", "black"};
+    std::u16string out;
+    for (size_t i = 0; i < text.size(); i++) {
+        char16_t c = text[i];
+        std::string key;
+        bool bare = false;  // no brackets: the font's own arrows
+        if (c >= 0x13 && c <= 0x1C) {
+            key = links::PromptKey(kButtonAction[c - 0x13]);
+        } else if (c == 0x8F) {
+            // the D-pad: the four arrows when it is the arrow keys, else its keys' first letters
+            std::string keys[4] = {links::PromptKey("dpad_up"), links::PromptKey("dpad_down"),
+                                   links::PromptKey("dpad_left"), links::PromptKey("dpad_right")};
+            bare = keys[0] == "\x8C" && keys[1] == "\x8B" && keys[2] == "\x8D" && keys[3] == "\x8E";
+            for (const std::string& k : keys)
+                if (!k.empty()) key += k[0];
+        } else if (c == 0x8B && i + 1 < text.size() && text[i + 1] == 0x8C) {
+            key = "LMB";  // the swing: the stick down and up is the left button's drag
+            i++;
+        }
+        if (key.empty()) {
+            out += c;
+            continue;
+        }
+        if (!bare) out += u'[';
+        for (char k : key) out += char16_t(static_cast<unsigned char>(k));
+        if (!bare) out += u']';
+    }
+    return out;
+}
+
+// an entry's text for the keyboard, or as the game has it for the controller. The name entry's "B BACK" says more: its
+// keys are picked with the D-pad or the arrows, and Esc leaves it, as Backspace, B's usual key, deletes a character
+// there (common/pc_controls.cpp). The game copies that help line once, as its menus load at boot, so it cannot follow
+// the last used device the way the other prompts do: with the keyboard and mouse on it names both, each button with its
+// key after it, "+/ARROWS SELECT  A/[ENT]PRESS  B/[ESC]BACK", whichever was used last.
+constexpr const char* kNameEntryHelp = "HelpKeyboardText";
+constexpr size_t kNameEntryHelpRoom = 40;
+std::u16string PromptText(const std::string& id, const std::u16string& text, bool keyboard) {
+    if (id == kNameEntryHelp && links::g_keyboard_mouse)
+        return u"\x8F/" + KeyboardText(u"\x8F") + u"SELECT  \x13/" + KeyboardText(u"\x13") + u"PRESS  \x14/[ESC]BACK";
+    return keyboard ? KeyboardText(text) : text;
+}
+
+// what RefreshPrompts last made the table's prompts: -1 nothing yet, 0 the controller's, 1 the keyboard's
+int g_prompts_applied = -1;
+uint32_t g_prompts_keys = 0, g_prompts_table = 0;
+
+// Every entry that names a button: its text kept, its entry given room for the keys' names. With `keyboard` the
+// entries start as the keyboard's: a menu's fixed texts are copied as the menus load, right after the table and before
+// the first time the controllers are read, and stay as they were then.
+void MakePromptRoom(Table& t, bool keyboard) {
+    g_prompt_text.clear();
+    for (auto& [id, entry] : t.entries) {
+        size_t at = 1 + entry[0] + 1, chars = entry[at] | entry[at + 1] << 8;
+        std::u16string text;
+        size_t buttons = 0;
+        for (size_t i = 0; i < chars; i++) {
+            text += char16_t(entry[at + 2 + 2 * i] | entry[at + 3 + 2 * i] << 8);
+            buttons += IsButton(text.back());
+        }
+        if (!buttons) continue;
+        g_prompt_text[id] = text;
+        size_t size = entry.size() + 2 * kPromptRoom * buttons + (id == kNameEntryHelp ? 2 * kNameEntryHelpRoom : 0);
+        entry.resize(size, 0);
+        std::u16string keys = PromptText(id, text, keyboard);
+        if (keys == text) continue;
+        size_t room = (size - (at + 2) - 5) / 2;
+        if (keys.size() > room) keys.resize(room);
+        uint8_t tail[5];
+        std::memcpy(tail, entry.data() + at + 2 + 2 * chars, 5);
+        entry = MakeEntry(id, keys, tail, size);
+    }
+    g_prompts_applied = keyboard ? 1 : 0;
+    g_prompts_keys = links::BindingsVersion();
 }
 
 // ---- the screens ----
@@ -1283,15 +1389,13 @@ uint32_t ControlList(X86Context& ctx, uint32_t control) {
 }  // namespace
 
 namespace links {
-// the FPS counter, in the top left corner (GameInfo::ui)
-std::atomic<uint32_t> g_frames_drawn{0};  // for ProbeAnimation: frames since its last report
-void HitchFrame();
 // The 3D camera's aspect, 0x4509F4, set once at boot (0x36039): 1.75 only for an HDTV AV pack with the widescreen
 // flag, else 1.5, which is what this PC's console reports (HalBootSMCVideoMode 0, a SCART pack) whatever the screen.
 // On a widescreen output it is the shape the frame is shown in (app::DisplayAspect), 16:9 or an ultrawide one.
 // Cameras take it as they are made (0x124AB9, the round's camera, into D3DXMatrixPerspectiveFovLH, whose field of
 // view is up and down), so a course is in proportion and an ultrawide one shows more at the sides at the same height.
-// Set every frame: the output can change while the game runs. A 4:3 output keeps the game's own.
+// Set every frame a menu or the HUD is drawn, on the game's thread (MenuCameraFrame): the output can change while the
+// game runs. A 4:3 output keeps the game's own.
 constexpr uint32_t kCameraAspect = 0x4509F4;
 constexpr float kWideAspect = 16.0f / 9.0f;
 void UpdateCameraAspect() {
@@ -1322,11 +1426,86 @@ void DrawUltrawideMask() {
     d->AddRectFilled(ImVec2(std::ceil(x1), 0), ImVec2(size.x, size.y), IM_COL32(0, 0, 0, 255));
 }
 
+// The entries with button prompts rewritten in place for the keyboard or the controller (see "keyboard prompts"):
+// the loaded table's count at +0x14, its offsets at +0x18 (the strings' size follows the last) and its strings at
+// +0x1C. Only when the device or the keys changed since it last ran.
+void RefreshPrompts(bool keyboard) {
+    int& applied = g_prompts_applied;
+    uint32_t& applied_keys = g_prompts_keys;
+    uint32_t& applied_table = g_prompts_table;
+    uint32_t keys = BindingsVersion();
+    if (!g_prompts_ready) return;
+    std::lock_guard<std::mutex> lock(g_prompt_lock);
+    if (!g_prompts_ready || !g_table || g_prompt_text.empty()) return;
+    if (applied == int(keyboard) && (!keyboard || applied_keys == keys) && applied_table == g_table) return;
+    uint32_t count = ::kernel::R32(g_table + 0x14), offs = ::kernel::R32(g_table + 0x18), data = ::kernel::R32(g_table + 0x1C);
+    if (!count || !offs || !data) return;
+    if (applied < 0 && !keyboard) {  // as loaded
+        applied = 0;
+        applied_table = g_table;
+        return;
+    }
+    uint32_t done = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t off = ::kernel::R32(offs + i * 4), size = ::kernel::R32(offs + (i + 1) * 4) - off;
+        const uint8_t* e = static_cast<const uint8_t*>(::kernel::HostPtr(data + off));
+        std::string id(reinterpret_cast<const char*>(e + 1), e[0]);
+        auto found = g_prompt_text.find(id);
+        if (found == g_prompt_text.end()) continue;
+        size_t head = 1 + id.size() + 1 + 2;
+        if (size < head + 5 || size > 0x10000) continue;
+        size_t chars = e[head - 2] | e[head - 1] << 8, room = (size - head - 5) / 2;
+        if (head + 2 * chars + 5 > size) continue;
+        uint8_t tail[5];
+        std::memcpy(tail, e + head + 2 * chars, 5);
+        std::u16string text = PromptText(id, found->second, keyboard);
+        if (text.size() > room) text.resize(room);
+        std::vector<uint8_t> fresh = MakeEntry(id, text, tail, size);
+        std::memcpy(::kernel::HostPtr(data + off), fresh.data(), size);
+        done++;
+    }
+    applied = int(keyboard);
+    applied_keys = keys;
+    applied_table = g_table;
+    LOGR("menu: button prompts are the %s (%u texts)", keyboard ? "keyboard's" : "controller's", done);
+}
+
+bool InRound() { return *static_cast<const uint8_t*>(::kernel::HostPtr(kInRound)) != 0; }
+
+// The quick menu's pages (quick_menu.h): the PC GRAPHICS and EXPERIMENTAL menus' own settings, by their labels, so
+// both menus change the same things the same way, and ULTRAWIDE, which only the quick menu has.
+const std::vector<QuickPage>& QuickPages() {
+    static const std::vector<QuickPage> pages = [] {
+        auto row = [](const char* label) {
+            for (const Screen* screen : kScreens)
+                for (uint32_t i = 0; i < screen->count; i++)
+                    if (!std::strcmp(screen->rows[i].label, label))
+                        return QuickRow{label, screen->rows[i].value, screen->rows[i].step};
+            LOGE("quick menu: no setting called %s", label);
+            return QuickRow{label, [] { return std::string(); }, [](int) {}};
+        };
+        QuickRow ultrawide{"ULTRAWIDE", [] { return std::string(app::Get().ultrawide ? "FILL" : "16:9"); },
+                           [](int) { app::Get().ultrawide = !app::Get().ultrawide; }};
+        QuickRow build{"BUILD UPSCALED UI", [] { return std::string(); }, nullptr,
+                       "Close the game and upscale its menus, HUD and fonts on this PC now?", [] {
+                           app::Save();
+                           if (!StartUiUpscale()) LOGE("quick menu: the UI upscaler did not start");
+                       }};
+        return std::vector<QuickPage>{
+            {"DISPLAY",
+             {row("MONITOR"), row("DISPLAY"), row("RESOLUTION"), row("FRAME RATE"), row("V-SYNC"), row("FPS COUNTER"),
+              row("OVERSCAN"), ultrawide}},
+            {"GRAPHICS",
+             {row("RENDER SCALE"), row("ANTI-ALIASING"), row("TEXTURE FILTER"), row("LOD DISTANCE"),
+              row("GRASS DISTANCE"), row("FIELD OF VIEW"), row("SMOOTH ANIMATION"), row("SKIP INTRO")}},
+            {"EXPERIMENTAL", {row("UPSCALED UI"), build}},
+        };
+    }();
+    return pages;
+}
+
 void DrawPcOverlay(double fps) {
-    g_frames_drawn++;
-    UpdateCameraAspect();
     DrawUltrawideMask();
-    if (g_hitch_log) HitchFrame();
     DrawDirectConnect();
     if (!g_fps_counter) return;
     ImGui::SetNextWindowPos(ImVec2(8, 8));
@@ -1461,6 +1640,10 @@ void PatchStringTable(X86Context& ctx, uint8_t*) {
     if (!buf || !ReadTable(buf, t)) return;
     if (Find(t, "GraphicsOptionsButton1") == t.entries.end()) return;  // not the menus' table
     SetPcStrings(t);
+    std::lock_guard<std::mutex> lock(g_prompt_lock);
+    g_prompts_ready = false;
+    bool keyboard = links::KeyboardPromptsNow();
+    MakePromptRoom(t, keyboard);
     std::vector<uint8_t> out = WriteTable(t);
     uint32_t fresh = GameAlloc(ctx, uint32_t(out.size()));
     if (!fresh) {
@@ -1471,230 +1654,38 @@ void PatchStringTable(X86Context& ctx, uint8_t*) {
     GameFree(ctx, buf);
     ::kernel::W32(table + 0x0C, fresh);
     g_table = table;
-    LOGR("menu: string table %u entries, PC GRAPHICS text added", uint32_t(t.entries.size()));
+    g_prompts_table = table;
+    g_prompts_ready = true;
+    LOGR("menu: string table %u entries, PC GRAPHICS text added, %u with button prompts, the %s to begin with",
+         uint32_t(t.entries.size()), uint32_t(g_prompt_text.size()), keyboard ? "keyboard's" : "controller's");
 }
 
-// The round's main loop (0x1F04E0) updates and draws, then waits until two vertical blanks have passed since the
-// frame began (0x1F0572..0x1F05A0, BlockUntilVerticalBlank): rounds at 30 FPS on a 60 Hz console. The game moves
-// everything by the time a frame took (its clock 0x42AD34 +0x14, from the timer by 0x34C37), so it does not need
-// the wait. 0x1F058B, the jump past the wait: taken unless FRAME RATE is ORIGINAL; the frame rate cap paces it then.
-bool UnlockGameFps(X86Context&, uint8_t*) { return !links::g_original_fps; }
-
-// Aiming is the exception: the left stick moves the aim by its deflection each frame, so at 60 FPS it moved twice as
-// fast. Every stick move ends in one of two functions: 0x125C40 (to the aiming camera's vtable +0x18) and 0x125D30
-// (+0x1C), called from the aim states' command handlers (0x210050, 0x215760, 0x2157C0, 0x215E10). Just after their
-// dead zone and before the call (0x125D19 and 0x125E09) the stick's x ([esp + 4]) and y ([esp]) are scaled by the
-// frame's time over the Xbox's 1/30 s, from the game's own clock (0x42AD34 +0x14, at most 0.1 s). FRAME RATE:
-// ORIGINAL keeps them as they are.
-namespace {
-// the time the frame took, by the game's own clock (0x42AD34 +0x14, at most 0.1 s), 0 before it runs
-float FrameTime() {
-    uint32_t clock = ::kernel::R32(0x0042AD34);
-    if (!clock) return 0.0f;
-    uint32_t raw = ::kernel::R32(clock + 0x14);
-    float dt;
-    std::memcpy(&dt, &raw, 4);
-    return dt > 0.0f ? dt : 0.0f;
-}
-
-void ScaleStick(X86Context& ctx, int which) {
-    if (links::g_original_fps) return;
-    uint32_t clock = ::kernel::R32(0x0042AD34);
-    if (!clock) return;
-    float dt, x, y;
-    uint32_t raw = ::kernel::R32(clock + 0x14);
-    std::memcpy(&dt, &raw, 4);
-    if (!(dt > 0.0f)) return;
-    float k = std::min(dt * 30.0f, 3.0f);
-    raw = ::kernel::R32(ctx.esp + 4);
-    std::memcpy(&x, &raw, 4);
-    raw = ::kernel::R32(ctx.esp);
-    std::memcpy(&y, &raw, 4);
-    static uint32_t logged[2];
-    if ((x != 0.0f || y != 0.0f) && logged[which] < 5) {
-        logged[which]++;
-        LOGR("aim: stick %d move %.3f %.3f, frame %.4f s, scaled by %.2f", which, x, y, dt, k);
-    }
-    x *= k;
-    y *= k;
-    std::memcpy(&raw, &x, 4);
-    ::kernel::W32(ctx.esp + 4, raw);
-    std::memcpy(&raw, &y, 4);
-    ::kernel::W32(ctx.esp, raw);
-}
-}  // namespace
-void ScaleAimMove(X86Context& ctx, uint8_t*) { ScaleStick(ctx, 0); }
-void ScaleAimMoveTurn(X86Context& ctx, uint8_t*) { ScaleStick(ctx, 1); }
-
-// The cameras behind them (the aiming cameras, vtables 0x3EE5C0 and 0x3EEDF8, the only ones whose moves do anything)
-// step their angles by the amount times a constant (0.06) per call, no frame time: that is why the stick needs the
-// scale. Their turn (vtable +0x20, 0x136370), reached through 0x125E20 (thiscall (amount), ret 4), is the same: the
-// triggers raising and lowering the camera before the shot (COMMAND_CAMHEIGHT_RAISE/LOWER, 0x215820 and 0x215850)
-// and the D-pad in the aim view (0x210050, 0.5 a frame) call it every frame they are held. 0x125E20, on entry: the
-// amount ([esp + 4]) scaled the same way.
-void ScaleCameraTurn(X86Context& ctx, uint8_t*) {
-    if (links::g_original_fps) return;
-    float dt = FrameTime(), v;
-    if (!(dt > 0.0f)) return;
-    uint32_t raw = ::kernel::R32(ctx.esp + 4);
-    std::memcpy(&v, &raw, 4);
-    v *= std::min(dt * 30.0f, 3.0f);
-    std::memcpy(&raw, &v, 4);
-    ::kernel::W32(ctx.esp + 4, raw);
-}
-
-// The objects' level of detail (trees, buildings, the crowd: 0x14F340 and its neighbours, for each object each
-// frame): an object at distance d from the camera is at full detail while d <= near x k + bias, fades to its lower
-// detail out to far x k + bias, and fades out past that (its LOD entry's +0x34, +0x38 and +0xA0). k is 0x434CA0, which
-// the camera's update (0x1254D0, every frame) works out from its field of view and the hole's RangeMultiplier
-// (0x434CA4, from the course's settings, CourseSettings Hole<n>, 1 to 5). 0x125983, just after it stored k: k times
-// LOD DISTANCE.
-// The fades step 1/30 a frame times 0x434CA8 (1, read nowhere else): it becomes the frame's time in 1/30 s, so they
-// take as long as on the Xbox at any frame rate.
-void ScaleLodDistance(X86Context&, uint8_t*) {
-    constexpr uint32_t kLodScale = 0x00434CA0, kLodFadeRate = 0x00434CA8;
-    float k = float(std::clamp(links::g_lod_percent, 25u, 1000u)) / 100.0f, v;
-    uint32_t raw = ::kernel::R32(kLodScale);
-    std::memcpy(&v, &raw, 4);
-    v *= k;
-    std::memcpy(&raw, &v, 4);
-    ::kernel::W32(kLodScale, raw);
-    float dt = FrameTime();
-    float rate = links::g_original_fps || !(dt > 0.0f) ? 1.0f : std::min(dt * 30.0f, 3.0f);
-    std::memcpy(&raw, &rate, 4);
-    ::kernel::W32(kLodFadeRate, raw);
-    static bool logged = false;
-    if (!logged) {
-        logged = true;
-        LOGR("lod: detail distance multiplier %.3f, LOD DISTANCE %u%% makes it %.3f", v / k, links::g_lod_percent, v);
-    }
-}
-
-// The 3D grass (the "VolumeGrass" pass, 0x171730): each frame the terrain's triangles inside a sphere are gathered
-// (the gatherer at 0x14BB60, its triangle test 0x14DEF0) and drawn again in the grass material's own way. The sphere
-// lies ahead of the camera: its centre is the camera's position plus its direction times 27 and its radius 27 (both
-// read from 0x3F1C64, at 0x17195A and 0x1719D7), so the grass ends about 54 units ahead. Just after each of the two
-// reads (0x171962, 0x1719DF) ScaleGrassSphere makes xmm0 27 times GRASS DISTANCE: the sphere reaches that much further.
-// The gatherer keeps its indices in one index buffer made at boot (0x14BB20: 0x1B58 bytes, 3500 indices) and stops
-// at 0xDA9 of them (0x14E4A3); a bigger sphere holds up to the square of GRASS DISTANCE as many triangles. The buffer
-// is made for the largest choice (GrowGrassIndices) and the stop moves with it (GrassIndexRoom). It also holds up to
-// 31 meshes (0x14E462: the terrain pieces the triangles come from), which cannot grow: GrassMeshesFull logs reaching
-// it, past which the grass leaves out the pieces it could not hold.
-namespace {
-constexpr uint32_t kGrassIndexBytes = 0x1B58;  // the game's buffer, 3500 indices
-constexpr uint32_t kGrassIndexScale = 9;       // the area of the largest GRASS DISTANCE, 3X
-}  // namespace
-void ScaleGrassSphere(X86Context& ctx, uint8_t*) {
-    if (links::g_grass_percent != 100)
-        ctx.xmm[0].f[0] *= float(std::clamp(links::g_grass_percent, 50u, 300u)) / 100.0f;
-}
-
-// 0x14BB2D, the call making the gatherer's index buffer: [esp] its size in bytes
-void GrowGrassIndices(X86Context& ctx, uint8_t*) {
-    if (::kernel::R32(ctx.esp) != kGrassIndexBytes) return;
-    ::kernel::W32(ctx.esp, kGrassIndexBytes * kGrassIndexScale);
-    LOGR("grass: room for %u indices, the game had %u", kGrassIndexBytes * kGrassIndexScale / 2, kGrassIndexBytes / 2);
-}
-
-// 0x14E4A3, before a triangle's three indices go in (esi the gatherer, its index count at +0x1A0): true adds them
-// (0x14E4AF) while the bigger buffer has room; false leaves the game's own stop at 0xDA9
-bool GrassIndexRoom(X86Context& ctx, uint8_t*) {
-    if (links::g_grass_percent == 100) return false;
-    return ::kernel::R32(ctx.esi + 0x1A0) + 3 <= kGrassIndexBytes * kGrassIndexScale / 2;
-}
-
-// 0x14E462, before a new mesh's entry (esi the gatherer, its mesh count at +0x1C, at most 31)
-void GrassMeshesFull(X86Context& ctx, uint8_t*) {
-    static int logged = 0;
-    if (::kernel::R32(ctx.esi + 0x1C) == 0x1F && logged < 5) {
-        logged++;
-        LOGR("grass: the gatherer is full at 31 terrain pieces (%u indices, GRASS DISTANCE %u%%)",
-             ::kernel::R32(ctx.esi + 0x1A0), links::g_grass_percent);
-    }
-}
-
-// SKIP INTRO. The boot shows LegalScreen1 from the game's start-up (0x37ACE), then a thread (0x36BB7) waits about five
-// seconds (0x1356 ms) after each legal screen and shows the next (LegalScreen2, LegalScreen3), then ShortLoad, the
-// loading screen; plays the Microsoft Game Studios and XSN Sports logo movies (MGSShortL, XSNShortL, through the movie
-// player 0x455228's 0x803E0, which plays one to its end); then, the first time, the Links logo without the start
-// button, the intro and the PRESS START loop (linksaniwoutstbtn, linksintro, startbtnloop), else the Links logo with
-// the start button (linksaniwstbtn). The PRESS START screen then loops logoloop, and START there (0x7FC90) plays the
-// intro unless the boot did (the byte 0x4552FC), then opens the main menu.
-// With SKIP INTRO on, the hooks go from the start straight to ShortLoad and from there to the end of the boot's
-// movies, with the intro marked as played: the boot goes from the loading screen to PRESS START, which stays (START
-// there is how the game picks the player's controller), and START goes to the main menu.
-namespace {
-constexpr uint32_t kIntroPlayed = 0x004552FC;  // byte: the boot played the intro, so START does not
-}  // namespace
-
-// 0x37BD0, about to show LegalScreen1: on true it is left out (to 0x37BDB, where the time it was shown is noted)
-bool SkipLegalScreen(X86Context&, uint8_t*) { return links::g_skip_intro; }
+// 0x5CC00, a button list's constructor; 0x5C200, its selection being set; 0x5C790, its destructor: ecx the list, for
+// the mouse in the menus (common/menu_mouse.cpp)
+void MenuListMade(X86Context& ctx, uint8_t*) { links::NoteMenuList(ctx.ecx); }
+void MenuListSelected(X86Context& ctx, uint8_t*) { links::NoteMenuList(ctx.ecx); }
+void MenuListGone(X86Context& ctx, uint8_t*) { links::ForgetMenuList(ctx.ecx); }
+// the same for a grid (RGuiGridNode): its constructor 0x63940, its selection being set 0x62090, its destructor 0x639C0
+void MenuGridMade(X86Context& ctx, uint8_t*) { links::NoteMenuGrid(ctx.ecx); }
+void MenuGridSelected(X86Context& ctx, uint8_t*) { links::NoteMenuGrid(ctx.ecx); }
+void MenuGridGone(X86Context& ctx, uint8_t*) { links::ForgetMenuGrid(ctx.ecx); }
 
 // 0x65000, the menus' camera (0x64F70) about to set its projection (D3DXMatrixPerspectiveFovLH by vtable + 0x20):
 // [esp] its aspect. On an ultrawide display it is made as much wider as the display is than 16:9, the field of view
 // up and down kept, so menus and the HUD keep their 16:9 shape and place in the middle, the sides left to the course.
-void UltrawideMenuAspect(X86Context& ctx, uint8_t*) {
+void UltrawideMenuAspect(X86Context& ctx) {
     float wide = app::DisplayAspect();
     if (wide <= 16.0f / 9.0f + 0.01f) return;
     float* a = static_cast<float*>(::kernel::HostPtr(ctx.esp));
     *a *= wide / (16.0f / 9.0f);
 }
 
-// 0x36BD2, the boot thread just started: on true, past the three waits and LegalScreen2 and 3, to ShortLoad (0x36C4E)
-bool SkipLegalScreens(X86Context&, uint8_t*) {
-    if (links::g_skip_intro) LOGR("boot: SKIP INTRO, the legal screens, logo movies and intro are left out");
-    return links::g_skip_intro;
-}
-
-// 0x36CA7, the boot's movies about to play: on true, past all of them (to 0x36DB0, which frees the movie name's
-// CString, made just before here, and ends the thread), the intro marked as played. The frame's unwind state, which
-// the skipped code sets to 1 as the CString is made, is set too.
-bool SkipBootMovies(X86Context& ctx, uint8_t*) {
-    if (!links::g_skip_intro) return false;
-    *static_cast<uint8_t*>(::kernel::HostPtr(ctx.ebp - 4)) = 1;
-    *static_cast<uint8_t*>(::kernel::HostPtr(kIntroPlayed)) = 1;
-    return true;
-}
-
-// The D-pad, which aims before the shot (idlehuman.cm: COMMAND_AIM_TURNLEFT/RIGHT, MOVEFORWARD/BACKWARD), comes to
-// the aim marker's turn (0x208B40) and move (0x208AA0) once a frame while held: thiscall (event, direction), ret 8,
-// the event's state at +0x10 (1 pressed, 2 held, else released). Each call steps the marker by an amount that grows
-// with how long the button has been held (by the game clock), so a frame is a step. Held calls go through at the
-// Xbox's rate, one per 1/30 s of game time, and the rest return at once; presses and releases always go through.
-namespace {
-float g_dpad_time[2];  // game time held since the last step went through: move, turn
-
-// true when this call should step the marker
-bool DpadStep(X86Context& ctx, int which) {
-    uint32_t event = ::kernel::R32(ctx.esp + 4);
-    uint32_t state = event ? ::kernel::R32(event + 0x10) : 0;
-    if (links::g_original_fps || state != 2) {
-        g_dpad_time[which] = 0.0f;
-        return true;
-    }
-    constexpr float kStep = 1.0f / 30.0f;
-    g_dpad_time[which] += FrameTime();
-    if (g_dpad_time[which] + 0.0005f < kStep) {
-        static int logged = 0;
-        if (logged++ < 3) LOGR("aim: D-pad %s held, a step waits (frame %.4f s)", which ? "turn" : "move", FrameTime());
-        return false;
-    }
-    g_dpad_time[which] = std::min(g_dpad_time[which] - kStep, kStep);
-    return true;
-}
-}  // namespace
-
-// The aim state's thunks 0x215F10 and 0x215F20 jump to them, and the recompiler folds each body into its thunk, so the
-// overrides go on the thunks (same arguments: the jump leaves the stack as the call made it).
-X86_EXTERN_FUNC(__imp__sub_00215F10);
-X86_FUNC(sub_00215F10) {
-    if (DpadStep(ctx, 0)) return __imp__sub_00215F10(ctx, base);
-    ::kernel::Return(ctx, 0, 2);
-}
-X86_EXTERN_FUNC(__imp__sub_00215F20);
-X86_FUNC(sub_00215F20) {
-    if (DpadStep(ctx, 1)) return __imp__sub_00215F20(ctx, base);
-    ::kernel::Return(ctx, 0, 2);
+// 0x65000: the menus' camera setting its projection, once a frame while a menu or the HUD is drawn, on the game's
+// thread: what the menus need each frame
+void MenuCameraFrame(X86Context& ctx, uint8_t*) {
+    links::UpdateCameraAspect();
+    TypeIntoKeyboard(ctx);
+    UltrawideMenuAspect(ctx);
 }
 
 // The in-round background's geometry (see the top of the file). A mesh in a .geom file is its name, its sub-mesh count,
@@ -1935,77 +1926,7 @@ X86_FUNC(sub_00097110) {
     __imp__sub_00097110(ctx, base);
 }
 
-// EXPERIMENTAL > ANIMATION LOG, a diagnostic for animations that look 30 FPS at higher frame rates. Every animated
-// object's clip gets its time through AnimClip's 0x161AF0 (thiscall (float seconds, play state*), ret 8), which blends
-// between the clip's 30 per second keyframes, so a clip only steps when its time does. Each call is counted by who
-// made it (the return address and the code addresses above it on the stack); once a second the log gets, for each
-// caller: how many play states it drove, the calls, how many of them changed the time, and the smallest, mean and
-// largest change. Calls that change the time about 30 times a second while frames are drawn faster are the steppers.
-namespace {
-struct ProbeGroup {
-    uint32_t chain[5] = {};
-    std::map<uint32_t, float> last;  // play state -> its time at the last call
-    uint32_t calls = 0, changes = 0;
-    double sum = 0;
-    float least = 1e9f, most = 0;
-    uint32_t frames = 0;  // of the clip last seen
-};
-std::mutex g_probe_lock;
-std::map<uint64_t, ProbeGroup> g_probe;
-std::chrono::steady_clock::time_point g_probe_next;
-
-void ProbeAnimation(X86Context& ctx) {
-    uint32_t clip = ctx.ecx, state = ::kernel::R32(ctx.esp + 8);
-    float time;
-    std::memcpy(&time, ::kernel::HostPtr(ctx.esp + 4), 4);
-    // the callers: the return address, then what looks like return addresses above it
-    uint32_t chain[5] = {::kernel::R32(ctx.esp)};
-    int n = 1;
-    for (uint32_t at = ctx.esp + 12; n < 5 && at < ctx.esp + 0x300; at += 4) {
-        uint32_t v = ::kernel::R32(at);
-        if (v >= 0x00012000 && v < 0x003D8000 && v != chain[n - 1]) chain[n++] = v;
-    }
-    uint64_t key = 1469598103934665603ull;
-    for (uint32_t c : chain) key = (key ^ c) * 1099511628211ull;
-    std::lock_guard<std::mutex> l(g_probe_lock);
-    ProbeGroup& g = g_probe[key];
-    std::memcpy(g.chain, chain, sizeof chain);
-    g.calls++;
-    std::memcpy(&g.frames, ::kernel::HostPtr(clip + 0x1C), 4);
-    auto [it, fresh] = g.last.emplace(state, time);
-    if (!fresh && it->second != time) {
-        float d = std::abs(time - it->second);
-        g.changes++;
-        g.sum += d;
-        g.least = std::min(g.least, d);
-        g.most = std::max(g.most, d);
-        it->second = time;
-    }
-    auto now = std::chrono::steady_clock::now();
-    if (now < g_probe_next) return;
-    g_probe_next = now + std::chrono::seconds(1);
-    uint32_t frames = links::g_frames_drawn.exchange(0);
-    LOGR("anim: %u frames drawn, %u callers", frames, uint32_t(g_probe.size()));
-    for (auto& [k, p] : g_probe) {
-        float clip_frames;
-        std::memcpy(&clip_frames, &p.frames, 4);
-        if (p.calls)
-            LOGR("anim:   %08X < %08X < %08X < %08X < %08X: %u states, %u calls, %u changes, step %.4f / %.4f / %.4f s, "
-                 "clip %.0f frames",
-                 p.chain[0], p.chain[1], p.chain[2], p.chain[3], p.chain[4], uint32_t(p.last.size()), p.calls, p.changes,
-                 p.changes ? p.least : 0.0f, p.changes ? float(p.sum / p.changes) : 0.0f, p.most, clip_frames);
-    }
-    g_probe.clear();
-}
-}  // namespace
-
-X86_EXTERN_FUNC(__imp__sub_00161AF0);
-X86_FUNC(sub_00161AF0) {
-    if (links::g_animation_log) ProbeAnimation(ctx);
-    __imp__sub_00161AF0(ctx, base);
-}
-
-// EXPERIMENTAL > SMOOTH ANIMATION. AnimClip's 0x1622F0 (thiscall (float seconds, play state*, bool blend), ret 0x0C)
+// PC GRAPHICS > SMOOTH ANIMATION. AnimClip's 0x1622F0 (thiscall (float seconds, play state*, bool blend), ret 0x0C)
 // applies a clip at a time: with blend, the poses of the keyframes before and after it mixed by how far between them
 // the time is (0x162140's first half, through the clip's blend buffer at +0x154, made on first use); without, the
 // earlier keyframe's pose alone. Each animation of an object says which (a GameObject's flag byte per animation, a
@@ -2016,64 +1937,3 @@ X86_FUNC(sub_001622F0) {
     __imp__sub_001622F0(ctx, base);
 }
 
-// hitch_log in the settings file, a diagnostic for stalls. Each drawn frame is timed (HitchFrame, from the overlay's
-// draw); a watcher thread samples every guest thread while a frame is overdue (at 30 ms and five more times, further
-// apart): the code addresses on its stack from the top, which are its callers, innermost first. When the late frame
-// arrives the log gets how long it took. A stall in the game's own code shows as the same addresses in each sample; one
-// in the runtime (a texture upload, a file read) shows the game's call into it at the top.
-namespace {
-using HitchClock = std::chrono::steady_clock;
-std::atomic<int64_t> g_hitch_frame_us{0};  // when the last frame was drawn
-std::atomic<int> g_hitch_samples{0};       // taken during the frame in progress
-std::atomic<int> g_hitch_budget{4000};     // sample lines left for this run
-constexpr int kHitchAfterMs[] = {30, 45, 70, 110, 170, 260, 400, 600};
-
-int64_t HitchNowUs() {
-    return std::chrono::duration_cast<std::chrono::microseconds>(HitchClock::now().time_since_epoch()).count();
-}
-
-void HitchSample(int64_t age_ms) {
-    for (auto& t : ::kernel::Threads()) {
-        X86Context* c = t->ctx;
-        if (!c || g_hitch_budget <= 0) continue;
-        uint32_t esp = c->esp, top = t->stack_top;
-        if (!esp || !top || esp >= top || top - esp > 0x100000) continue;
-        char line[256];
-        int n = 0, found = 0;
-        for (uint32_t at = esp; at + 4 <= top && found < 14; at += 4) {
-            uint32_t v = ::kernel::R32(at);
-            if (v < 0x00012000 || v >= 0x003D8000) continue;
-            n += std::snprintf(line + n, sizeof line - size_t(n), " %06X", v);
-            found++;
-        }
-        if (!found) continue;
-        g_hitch_budget--;
-        LOGR("hitch:   +%lld ms thread %X:%s", static_cast<long long>(age_ms), t->id, line);
-    }
-}
-
-void HitchWatch() {
-    for (;;) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
-        int64_t last = g_hitch_frame_us;
-        if (!last || !links::g_hitch_log) continue;
-        int64_t age_ms = (HitchNowUs() - last) / 1000;
-        int taken = g_hitch_samples;
-        if (taken < int(std::size(kHitchAfterMs)) && age_ms >= kHitchAfterMs[taken]) {
-            g_hitch_samples = taken + 1;
-            HitchSample(age_ms);
-        }
-    }
-}
-}  // namespace
-
-namespace links {
-void HitchFrame() {
-    static std::once_flag started;
-    std::call_once(started, [] { std::thread(HitchWatch).detach(); });
-    int64_t now = HitchNowUs(), last = g_hitch_frame_us.exchange(now);
-    int samples = g_hitch_samples.exchange(0);
-    if (last && now - last >= 30000 && g_hitch_budget > 0)
-        LOGR("hitch: a frame took %.1f ms (%d samples above)", double(now - last) / 1000.0, samples);
-}
-}  // namespace links

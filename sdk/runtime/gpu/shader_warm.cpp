@@ -41,6 +41,8 @@ std::string SpriteSizeHlsl(std::string s) {
 
 namespace warm {
 
+static_assert(kCompileFlags == D3DCOMPILE_OPTIMIZATION_LEVEL1, "the cache was made with optimization level 1");
+
 using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;
 
@@ -109,6 +111,34 @@ void StoreCached(uint64_t hash, uint64_t check, size_t source_size, ID3DBlob* co
     std::fclose(f);
     if (ok) fs::rename(part, path, ec);
     if (!ok || ec) fs::remove(part, ec);
+}
+
+// ---- one compile of a shader at a time ----
+
+namespace {
+std::mutex g_flight_lock;
+std::condition_variable g_flight_done;
+std::unordered_set<uint64_t> g_flight;  // shaders being compiled
+}  // namespace
+
+bool Claim(uint64_t hash) {
+    std::unique_lock<std::mutex> l(g_flight_lock);
+    if (g_flight.insert(hash).second) return true;
+    g_flight_done.wait(l, [&] { return !g_flight.count(hash); });
+    return false;
+}
+
+bool TryClaim(uint64_t hash) {
+    std::lock_guard<std::mutex> l(g_flight_lock);
+    return g_flight.insert(hash).second;
+}
+
+void Release(uint64_t hash) {
+    {
+        std::lock_guard<std::mutex> l(g_flight_lock);
+        g_flight.erase(hash);
+    }
+    g_flight_done.notify_all();
 }
 
 // ---- the list: shaders.list, a header and a record per shader ----
@@ -192,16 +222,19 @@ void Run(const Job& j) {
     uint64_t check = 0, hash = ShaderHash(src, "main", profile, check);
     if (hash != j.r.shader) g_changed++;  // generated differently by this runtime: still the shader a draw will ask for
     ComPtr<ID3DBlob> code, err;
-    if (LoadCached(hash, check, src.size(), code)) {
+    // in the cache, or the renderer is compiling it right now (it will be in the cache)
+    if (LoadCached(hash, check, src.size(), code) || !TryClaim(hash)) {
         g_cached++;
         return;
     }
     if (FAILED(D3DCompile(src.data(), src.size(), nullptr, nullptr, nullptr, "main", profile,
-                          D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, &code, &err))) {
+                          kCompileFlags, 0, &code, &err))) {
+        Release(hash);
         g_failed++;
         return;
     }
     StoreCached(hash, check, src.size(), code.Get());
+    Release(hash);
     g_compiled++;
 }
 
@@ -284,7 +317,8 @@ void Start() {
     if (g_started) return;
     g_started = true;
     ReadList();
-    unsigned n = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 6u);
+    // half the CPU's threads, at most 4: more starve the title's own threads during its first load
+    unsigned n = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
     for (unsigned i = 0; i < n; i++) std::thread(Worker).detach();
     // programs the title made before the renderer started
     for (auto& [hash, code] : g_program_code) {

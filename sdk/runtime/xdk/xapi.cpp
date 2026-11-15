@@ -26,7 +26,7 @@ void UpdatePorts() {
     std::lock_guard<std::mutex> lock(g_ports_lock);
     uint32_t cur = 0;
     for (int p = 0; p < 4; p++)
-        if (input::Poll(p).connected) cur |= 1u << p;
+        if (input::Poll(p, true).connected) cur |= 1u << p;
     uint32_t old = R32(kGamepadType + XDK_XPP_Current);
     if (cur != old) {
         W32(kGamepadType + XDK_XPP_Changed, R32(kGamepadType + XDK_XPP_Changed) | (cur ^ old));
@@ -125,7 +125,7 @@ HLE_STDCALL(XInputGetCapabilities, 2) {
         if (it == g_handles.end()) return 6;  // ERROR_INVALID_HANDLE
         port = it->second.port;
     }
-    if (!input::Poll(int(port)).connected) return 1167;  // ERROR_DEVICE_NOT_CONNECTED
+    if (!input::Poll(int(port), true).connected) return 1167;  // ERROR_DEVICE_NOT_CONNECTED
     uint32_t c = a[1];
     std::memset(HostPtr(c), 0xFF, kCapsBytes);
     G<uint8_t>(c) = kSubtypeGamepad;

@@ -88,26 +88,7 @@ X86_FUNC(sub_003A08A3) { DsOk2(ctx); }  // -> 0x3A078B CDirectSoundStream_SetOut
 // ---- movies (XMV) ----
 // The game's movie open (0x1CF280) does CreateFile, an overlapped 4 KB ReadFile, GetOverlappedResult and
 // XMVDecoder_CreateDecoderForPackets (0x376A40). Any failure leaves the movie object's decoder (its first field)
-// null, which the game does not check: its next call of XMVDecoder_GetNextFrame then crashed. These hooks log each
-// step, so the log shows which one fails. LOGR: a release build keeps only errors and reports in the log.
-
-// 0x1CF2B7, before CreateFile: eax is the path
-void LogMovieOpen(X86Context& ctx, uint8_t* base) {
-    const char* path = reinterpret_cast<const char*>(base + ctx.eax);
-    LOGR("movie: open %.*s", int(strnlen(path, 260)), path);
-}
-// 0x1CF2BC, after CreateFile: eax is the handle, -1 when the file was not opened
-void LogMovieCreateFile(X86Context& ctx, uint8_t*) { LOGR("movie: CreateFile returned %08X", ctx.eax); }
-// 0x1CF305, after the first ReadFile: eax is its BOOL
-void LogMovieReadFile(X86Context& ctx, uint8_t*) { LOGR("movie: ReadFile returned %u", ctx.eax); }
-// 0x1CF30E, after GetLastError when ReadFile returned 0: 0x3E5 (pending) is fine
-void LogMovieLastError(X86Context& ctx, uint8_t*) { LOGR("movie: GetLastError %u", ctx.eax); }
-// 0x1CF33F, after GetOverlappedResult: eax is its BOOL, the byte count is at [esp + 0x10] and must be 4096
-void LogMovieOverlapped(X86Context& ctx, uint8_t*) {
-    LOGR("movie: GetOverlappedResult returned %u, %u bytes", ctx.eax, ::kernel::R32(ctx.esp + 0x10));
-}
-// 0x1CF377, after XMVDecoder_CreateDecoderForPackets: eax is its HRESULT
-void LogMovieDecoder(X86Context& ctx, uint8_t*) { LOGR("movie: decoder create returned %08X", ctx.eax); }
+// null, which the game does not check: its next call of XMVDecoder_GetNextFrame then crashed.
 
 // XMVDecoder_GetNextFrame(decoder, surface, &result, timestamp), ret 0x10. With no decoder it reports
 // XMV_ENDOFFILE (2), which the game (0x1CF453) takes as the movie having ended, instead of crashing.

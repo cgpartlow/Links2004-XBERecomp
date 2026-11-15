@@ -16,7 +16,5 @@ void DrawDirectConnect();
 // GameInfo::pad: reads the controllers for the window and keeps them from the game while it is open, then presses
 // UP and A on the game's controller to go from DIRECT CONNECT to System Link
 void DirectConnectPad(int port, input::Pad& pad);
-// GameInfo::window, before the renderer builds its font atlas: the window's font
-void LoadDirectConnectFont();
 
 }  // namespace links

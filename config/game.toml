@@ -299,31 +299,6 @@ call = "ApuCounterEbx"
 on_true = 0x003D70D5
 
 
-# movie open diagnostics, src/game/hooks.cpp logs each step of 0x1CF280
-[[hook]]
-at = 0x001CF2B7
-call = "LogMovieOpen"
-
-[[hook]]
-at = 0x001CF2BC
-call = "LogMovieCreateFile"
-
-[[hook]]
-at = 0x001CF305
-call = "LogMovieReadFile"
-
-[[hook]]
-at = 0x001CF30E
-call = "LogMovieLastError"
-
-[[hook]]
-at = 0x001CF33F
-call = "LogMovieOverlapped"
-
-[[hook]]
-at = 0x001CF377
-call = "LogMovieDecoder"
-
 # PC GRAPHICS in the Graphics Options menu, src/game/pc_graphics.cpp: the menu's scene as Rui_ReadLuaFile runs it,
 # its layout just after it ran, and the string table after its load read the file
 [[hook]]
@@ -427,4 +402,40 @@ on_true = 0x00036DB0
 # ULTRAWIDE: the menus' camera about to set its projection, its aspect widened for an ultrawide display
 [[hook]]
 at = 0x00065000
-call = "UltrawideMenuAspect"
+call = "MenuCameraFrame"
+
+# the mouse in the menus (menu_mouse.h): a button list made, its selection set, and destroyed
+[[hook]]
+at = 0x0005CC00
+call = "MenuListMade"
+
+[[hook]]
+at = 0x0005C200
+call = "MenuListSelected"
+
+[[hook]]
+at = 0x0005C790
+call = "MenuListGone"
+
+# ...and a grid (club selection, the golfers) made, its selection set, and destroyed
+[[hook]]
+at = 0x00063940
+call = "MenuGridMade"
+
+[[hook]]
+at = 0x00062090
+call = "MenuGridSelected"
+
+[[hook]]
+at = 0x000639C0
+call = "MenuGridGone"
+
+# typing a name: the name entry's init, for the menu the keyboard types into
+[[hook]]
+at = 0x00092880
+call = "KeyboardMenuInit"
+
+# FIELD OF VIEW: a 3D camera's projection setter about to use its field of view
+[[hook]]
+at = 0x00182700
+call = "CameraFieldOfView"

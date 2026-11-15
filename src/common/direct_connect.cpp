@@ -10,6 +10,7 @@
 // stays put. Confirmed, the address is saved as join_ip, and once every button is let go the game's controller presses
 // UP (DIRECT CONNECT is the item under System Link) and then A, as a player would.
 #include "common/direct_connect.h"
+#include "common/ui_font.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -153,7 +154,6 @@ int g_cursor = 0;
 std::string g_error;
 std::atomic<bool> g_open{false};
 std::atomic<int> g_game_port{0};
-ImFont* g_font = nullptr;
 
 // ---- the controllers ----
 
@@ -220,10 +220,10 @@ const ImU32 kCell = Rgb(30, 35, 44);
 const ImU32 kWarn = Rgb(240, 110, 90);
 
 void Text(ImDrawList* dl, float size, ImVec2 at, ImU32 colour, const std::string& text) {
-    dl->AddText(g_font, size, at, colour, text.c_str());
+    dl->AddText(UiFont(), size, at, colour, text.c_str());
 }
 float Width(float size, const std::string& text) {
-    ImFont* f = g_font ? g_font : ImGui::GetFont();
+    ImFont* f = UiFont() ? UiFont() : ImGui::GetFont();
     return f->CalcTextSizeA(size, 1e9f, 0.0f, text.c_str()).x;
 }
 void Centred(ImDrawList* dl, float size, float x, float y, float w, ImU32 colour, const std::string& text) {
@@ -491,23 +491,6 @@ void DirectConnectPad(int port, input::Pad& pad) {
     if (port != g_game_port) return;
     if (s == Steer::Up) pad.buttons |= 0x01;  // D-pad up
     if (s == Steer::Press) pad.analog[0] = 0xFF;  // A
-}
-
-void LoadDirectConnectFont() {
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.Fonts->Fonts.empty()) io.Fonts->AddFontDefault();  // the first is the default, the FPS counter's
-    wchar_t dir[MAX_PATH] = {};
-    if (!GetWindowsDirectoryW(dir, MAX_PATH)) return;
-    for (const wchar_t* name : {L"\\Fonts\\segoeuib.ttf", L"\\Fonts\\segoeui.ttf", L"\\Fonts\\arialbd.ttf"}) {
-        std::wstring path = std::wstring(dir) + name;
-        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
-        char utf8[MAX_PATH * 3] = {};
-        WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, utf8, sizeof utf8, nullptr, nullptr);
-        ImFontConfig config;
-        config.OversampleH = 2;
-        g_font = io.Fonts->AddFontFromFileTTF(utf8, 64.0f, &config);
-        if (g_font) return;
-    }
 }
 
 }  // namespace links
